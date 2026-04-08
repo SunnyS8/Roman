@@ -40,6 +40,15 @@ import { CandidatesRepo as LearnerCandidatesRepo } from './learner/candidates-re
 import { FeedbackRepo } from './feedback/repo.js'
 import { ProposalsRepo as CoachProposalsRepo } from './coach/proposals-repo.js'
 import { FeedbackService } from './feedback/service.js'
+// Fix4: pg-boss cron wiring for Learner / Skills / Coach nightly runners.
+import * as PgBossModule from 'pg-boss'
+const PgBoss: any = (PgBossModule as any).default ?? (PgBossModule as any).PgBoss ?? PgBossModule
+import { Learner } from './learner/learner.js'
+import { createGeminiPatternLLM } from './learner/pattern-detector.js'
+import { createGeminiSkillGeneratorLLM } from './learner/skill-generator.js'
+import { Coach } from './coach/coach.js'
+import { createGeminiCoachLLM } from './coach/analyzer.js'
+import { registerCronWiring, createAdminCronHandler, type CronRunners } from './cron-wiring.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -162,6 +171,7 @@ export async function startMultiServer(): Promise<void> {
   // the keyboard is ATTACHED to outgoing messages (handled in router.ts).
   const feedbackRepo = new FeedbackRepo(pool)
   const feedbackService = new FeedbackService(feedbackRepo)
+  const coachProposalsRepo = new CoachProposalsRepo(pool)
   if (channels.telegram && (channels.telegram as any).setFeedbackService) {
     ;(channels.telegram as any).setFeedbackService(feedbackService)
     logger.info('telegram feedback service attached')
@@ -198,7 +208,7 @@ export async function startMultiServer(): Promise<void> {
     // persona tweak tools onto the root agent. Nightly runner (pg-boss cron)
     // is not registered here yet — pg-boss isn't initialised in server.ts (see
     // learner cron TODO above).
-    coachProposalsRepo: new CoachProposalsRepo(pool),
+    coachProposalsRepo,
   }
 
   const router = new BotRouter({
@@ -241,13 +251,74 @@ export async function startMultiServer(): Promise<void> {
     intervalMs: env.BC_REMINDERS_POLL_INTERVAL_MS,
   })
 
-  // Healthz (+ WAVE3C oauth relay callback mounted on the same port)
+  // Fix4: pg-boss init (fail-open — if Postgres is down for pg-boss schema
+  // bootstrap, cron tasks are skipped but the rest of the service boots).
+  let boss: any | undefined
+  try {
+    boss = new PgBoss({
+      connectionString: env.BC_DATABASE_URL,
+      schema: 'pgboss',
+      retentionHours: 168,
+    })
+    boss.on('error', (err: unknown) => {
+      logger.warn('pg-boss error', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+    await boss.start()
+    logger.info('pg-boss started')
+  } catch (e) {
+    logger.warn('pg-boss failed to start, cron tasks disabled', {
+      error: e instanceof Error ? e.message : String(e),
+    })
+    boss = undefined
+  }
+
+  // Fix4: runners used by both nightly cron registration and the admin
+  // trigger endpoint. Constructed once so both code paths share state.
+  const cronRunners: CronRunners = {
+    learner: new Learner({
+      pool,
+      convRepo,
+      skillsRepo,
+      candidatesRepo: learnerCandidatesRepo,
+      patternLLM: createGeminiPatternLLM(getGemini() as any),
+      generatorLLM: createGeminiSkillGeneratorLLM(getGemini() as any),
+      availableTools: () => [],
+    }),
+    skillManager,
+    coach: new Coach({
+      pool,
+      feedbackRepo,
+      convRepo,
+      personaRepo,
+      proposalsRepo: coachProposalsRepo,
+      llm: createGeminiCoachLLM(getGemini() as any),
+    }),
+  }
+
+  if (boss && process.env.BC_CRON_ENABLED !== '0') {
+    await registerCronWiring(boss, cronRunners, logger)
+  } else if (!boss) {
+    logger.warn('cron wiring skipped (pg-boss unavailable)')
+  } else {
+    logger.info('cron wiring disabled via BC_CRON_ENABLED=0')
+  }
+
+  // Healthz (+ WAVE3C oauth relay callback mounted on the same port,
+  // + Fix4 admin cron trigger endpoint).
   const relayHandler = createRelayCallbackHandler({
     oauthRepo,
     mcpServersRepo,
   })
+  const adminCronHandler = createAdminCronHandler({
+    runners: cronRunners,
+    secret: process.env.BC_ADMIN_SECRET,
+    logger,
+  })
   const healthzServer = startHealthzServer(env.BC_HEALTHZ_PORT, pool, [
     { method: 'POST', path: '/oauth/token', handler: relayHandler },
+    { method: 'POST', path: '/admin/cron/run', handler: adminCronHandler },
   ])
   logger.info('healthz server listening', { port: env.BC_HEALTHZ_PORT })
 
@@ -268,6 +339,14 @@ export async function startMultiServer(): Promise<void> {
       logger.info('shutdown: draining in-flight work')
       await router.drainInFlight(300_000)
       await remindersWorker.stop()
+      if (boss) {
+        try {
+          await boss.stop({ graceful: true, timeout: 5000 })
+          logger.info('pg-boss stopped')
+        } catch (e) {
+          logger.warn('pg-boss stop failed', { error: String(e) })
+        }
+      }
       for (const adapter of Object.values(channels)) {
         if (adapter) await adapter.stop()
       }
