@@ -52,6 +52,41 @@ export function parseFireAt(input: string, now: Date = new Date()): Date | null 
     if (ms !== null) return new Date(now.getTime() + ms)
   }
 
+  // "сегодня в HH:MM" / "завтра в HH:MM" / "today at HH:MM" / "tomorrow at HH:MM"
+  // Interprets HH:MM in the user's local timezone (default Europe/Moscow = UTC+3
+  // unless BC_USER_TZ_OFFSET_HOURS overrides). Returns a UTC Date.
+  const dayPhrase = trimmed.match(
+    /^(сегодня|завтра|послезавтра|today|tomorrow)\s+(?:в|at)\s+(\d{1,2})[:.](\d{2})/i,
+  )
+  if (dayPhrase) {
+    const dayWord = dayPhrase[1].toLowerCase()
+    const hh = parseInt(dayPhrase[2], 10)
+    const mm = parseInt(dayPhrase[3], 10)
+    if (hh >= 0 && hh < 24 && mm >= 0 && mm < 60) {
+      const tzOffsetHours = Number(process.env.BC_USER_TZ_OFFSET_HOURS ?? '3')
+      const dayDelta =
+        dayWord === 'сегодня' || dayWord === 'today'
+          ? 0
+          : dayWord === 'послезавтра'
+            ? 2
+            : 1
+      // Shift `now` into user wall clock, advance day, then back to UTC.
+      const userNow = new Date(now.getTime() + tzOffsetHours * 60 * 60 * 1000)
+      const target = new Date(
+        Date.UTC(
+          userNow.getUTCFullYear(),
+          userNow.getUTCMonth(),
+          userNow.getUTCDate() + dayDelta,
+          hh,
+          mm,
+          0,
+          0,
+        ),
+      )
+      return new Date(target.getTime() - tzOffsetHours * 60 * 60 * 1000)
+    }
+  }
+
   return null
 }
 
@@ -78,7 +113,7 @@ export function createReminderTools(deps: ReminderToolsDeps): MemoryTool[] {
   const setReminder: MemoryTool = {
     name: 'set_reminder',
     description:
-      'Поставить напоминание. Параметр fire_at принимает ISO timestamp ИЛИ относительное смещение типа "1m", "60s", "2h", "3d", "+5m", "in 10 minutes". Используй относительный формат когда юзер говорит "через минуту/час/день" — это надёжнее чем считать ISO. Напоминание придёт в текущий канал.',
+      'Поставить напоминание. Параметр fire_at принимает: ISO 8601 timestamp; относительное смещение "1m"/"60s"/"2h"/"3d"/"+5m"; "in 10 minutes" / "через 10 минут"; "завтра в 10:30" / "сегодня в 18:00" / "послезавтра в 9:00" (часовой пояс пользователя — Europe/Moscow по умолчанию). Напоминание придёт в текущий канал.',
     parameters: setParams,
     async execute(params) {
       const parsed = setParams.parse(params)

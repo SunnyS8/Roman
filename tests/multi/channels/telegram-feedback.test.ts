@@ -114,7 +114,7 @@ describe('telegram feedback integration', () => {
 
   it('callback handler with valid refId submits feedback and clears ref', async () => {
     const store = getFeedbackRefStore()
-    store.set('abc123deadb', {
+    store.set('abc123deadbe', {
       workspaceId: 'ws1',
       channel: 'telegram',
       chatId: '12345',
@@ -128,7 +128,7 @@ describe('telegram feedback integration', () => {
 
     const ctx: any = {
       callbackQuery: {
-        data: 'fb:up:abc123deadb',
+        data: 'fb:up:abc123deadbe',
         message: { message_id: 777 },
       },
       answerCallbackQuery: vi.fn(async () => {}),
@@ -145,7 +145,7 @@ describe('telegram feedback integration', () => {
     expect(payload.rawText).toBe('Hello')
     expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Спасибо за 👍' })
     // Ref consumed
-    expect(store.get('abc123deadb')).toBeUndefined()
+    expect(store.get('abc123deadbe')).toBeUndefined()
   })
 
   it('callback handler with thumbs-down reports -1', async () => {

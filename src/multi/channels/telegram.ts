@@ -107,7 +107,10 @@ export class TelegramAdapter implements ChannelAdapter {
     // Wave 2C: feedback callback handler. Active regardless of feedbackEnabled,
     // because old messages from a previous enabled-run might still have live
     // keyboards. Parses refId → looks up in refStore → submits feedback.
-    this.bot.callbackQuery(/^fb:(up|down):([a-f0-9]{6,32})$/, async (ctx) => {
+    // refId is generated as exactly 12 hex chars by FeedbackRefStore.newRefId()
+    // (security review fix: previously {6,32} accepted shorter IDs which lowers
+    // brute-force resistance from 2^48 to 2^24).
+    this.bot.callbackQuery(/^fb:(up|down):([a-f0-9]{12})$/, async (ctx) => {
       await handleFeedbackCallback(ctx, this.feedbackService)
     })
 
@@ -361,7 +364,7 @@ export async function handleFeedbackCallback(
   feedbackService: FeedbackService | undefined,
 ): Promise<void> {
   const data = (ctx.callbackQuery as any)?.data as string | undefined
-  const match = data ? /^fb:(up|down):([a-f0-9]{6,32})$/.exec(data) : null
+  const match = data ? /^fb:(up|down):([a-f0-9]{12})$/.exec(data) : null
   if (!match) {
     try {
       await ctx.answerCallbackQuery({ text: 'Неизвестная команда' })
