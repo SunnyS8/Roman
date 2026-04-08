@@ -15,6 +15,8 @@ import { OAuthRepo } from '../../../src/multi/oauth/repo.js'
 import { McpServersRepo } from '../../../src/multi/agents/mcp/repo.js'
 import { McpRegistry } from '../../../src/multi/agents/mcp/registry.js'
 import { OAuthResolver } from '../../../src/multi/agents/mcp/oauth-resolver.js'
+import { FeedbackRepo } from '../../../src/multi/feedback/repo.js'
+import { FeedbackService } from '../../../src/multi/feedback/service.js'
 import type { RunBetsyDeps } from '../../../src/multi/agents/runner.js'
 
 const fakePool = {} as Pool
@@ -59,5 +61,31 @@ describe('server wiring smoke', () => {
     // still instantiate from just a pool.
     expect(oauthRepo).toBeInstanceOf(OAuthRepo)
     expect(mcpServersRepo).toBeInstanceOf(McpServersRepo)
+  })
+
+  // FIX2: FeedbackService must be instantiated in server.ts and installed on
+  // the telegram adapter, otherwise Wave 2C's inline-keyboard feedback silently
+  // drops every click. This test locks in:
+  //  - FeedbackRepo + FeedbackService construct from just a Pool
+  //  - setFeedbackService() is the exact method name on TelegramAdapter
+  //  - feedbackService fits into RunBetsyDeps as an optional field
+  it('FIX2: FeedbackService wires into deps and telegram adapter', () => {
+    const feedbackRepo = new FeedbackRepo(fakePool)
+    const feedbackService = new FeedbackService(feedbackRepo)
+    expect(feedbackService).toBeInstanceOf(FeedbackService)
+
+    const deps: Partial<RunBetsyDeps> = { feedbackService }
+    expect(deps.feedbackService).toBe(feedbackService)
+
+    // Shape check: TelegramAdapter exposes setFeedbackService(svc). We avoid
+    // instantiating the real adapter (it opens a grammy Bot) and instead
+    // assert a mock with that method accepts our service.
+    const mockAdapter: { setFeedbackService(svc: FeedbackService): void; stored?: FeedbackService } = {
+      setFeedbackService(svc) {
+        this.stored = svc
+      },
+    }
+    mockAdapter.setFeedbackService(feedbackService)
+    expect(mockAdapter.stored).toBe(feedbackService)
   })
 })

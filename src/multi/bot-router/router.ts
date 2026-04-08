@@ -20,6 +20,10 @@ import { drainPendingMedia, clearPendingMedia } from '../agents/pending-media.js
 import { getChatAction, clearChatAction } from '../agents/chat-action-state.js'
 import { InboundCoalescer } from './inbound-coalescer.js'
 import { classifyIntent, type ClassifierAction } from '../agents/intent-classifier.js'
+// FIX2: generate feedback refId for stream path so telegram adapter attaches
+// the 👍/👎 keyboard under the assistant's reply.
+import { getFeedbackRefStore, FeedbackRefStore } from '../feedback/ref-store.js'
+import { feedbackEnabled } from '../channels/telegram.js'
 
 const COALESCE_DEBOUNCE_MS = Number(process.env.BC_INBOUND_DEBOUNCE_MS ?? 0)
 const COALESCE_MIN_DEBOUNCE_MS = Number(process.env.BC_INBOUND_MIN_DEBOUNCE_MS ?? 0)
@@ -407,14 +411,38 @@ export class BotRouter {
               // hits, both streamMessage and done are abandoned. streamMessage
               // will NOT finalize the partial draft (see telegram.ts), so the
               // user sees nothing — clean for retry.
+              // FIX2: if feedback is enabled and this is telegram, generate a
+              // refId and stash the outgoing context in the ref store. The
+              // telegram adapter reads feedbackRefId off StreamableOutbound,
+              // backfills messageId after send, and the callback handler
+              // resolves refId→rawText/userMessage when the user clicks 👍/👎.
+              let feedbackRefId: string | undefined
+              if (feedbackEnabled() && ev.channel === 'telegram') {
+                feedbackRefId = FeedbackRefStore.newRefId()
+                getFeedbackRefStore().set(feedbackRefId, {
+                  workspaceId: workspace.id,
+                  channel: 'telegram',
+                  chatId: ev.chatId,
+                  rawText: '', // backfilled after done() resolves below
+                  userMessage: ev.text,
+                })
+              }
               const turnPromise = (async () => {
                 const sendResult = await channel.streamMessage!({
                   chatId: ev.chatId,
                   textStream,
                   replyToPromise,
                   finalTextOverride: finalTextPromise, // FIX1: post-stream critic
+                  feedbackRefId, // FIX2
                 })
                 const d = await done
+                // FIX2: backfill final text into ref store so feedback rows
+                // record what the user actually saw (post-critic, if any).
+                if (feedbackRefId) {
+                  getFeedbackRefStore().update(feedbackRefId, {
+                    rawText: d.text ?? '',
+                  })
+                }
                 const rowId = await assistantRowIdPromise
                 if (sendResult.externalMessageId != null && rowId && this.deps.convRepo) {
                   await this.deps.convRepo

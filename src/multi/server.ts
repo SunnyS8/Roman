@@ -34,6 +34,11 @@ import { Critic } from './critic/critic.js'
 import { SkillsRepo } from './skills/repo.js'
 import { SkillManager } from './skills/manager.js'
 import { CandidatesRepo as LearnerCandidatesRepo } from './learner/candidates-repo.js'
+// FIX2: wire FeedbackService into telegram channel so inline 👍/👎 callbacks
+// are actually recorded. Wave 2C built the infrastructure but server.ts never
+// instantiated the service, so channel.setFeedbackService(undefined) was a silent no-op.
+import { FeedbackRepo } from './feedback/repo.js'
+import { FeedbackService } from './feedback/service.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -151,6 +156,16 @@ export async function startMultiServer(): Promise<void> {
   const learnerCandidatesRepo = new LearnerCandidatesRepo(pool)
   // FIX1.5: register learner cron triggers when boss is in scope (see above).
 
+  // FIX2: feedback service. Instantiated unconditionally so the telegram
+  // callback handler can resolve refIds — the feature flag only gates whether
+  // the keyboard is ATTACHED to outgoing messages (handled in router.ts).
+  const feedbackRepo = new FeedbackRepo(pool)
+  const feedbackService = new FeedbackService(feedbackRepo)
+  if (channels.telegram && (channels.telegram as any).setFeedbackService) {
+    ;(channels.telegram as any).setFeedbackService(feedbackService)
+    logger.info('telegram feedback service attached')
+  }
+
   // Bot router with runBetsy agent runner
   const runBetsyDeps = {
     wsRepo,
@@ -176,6 +191,8 @@ export async function startMultiServer(): Promise<void> {
     // FIX1.5: close Wave 1C / 2A wiring gaps.
     skillManager,
     learnerCandidatesRepo,
+    // FIX2: expose feedback service to runner deps so future coach tools can query.
+    feedbackService,
   }
 
   const router = new BotRouter({

@@ -166,6 +166,9 @@ export interface RunBetsyDeps {
   oauthRepo?: OAuthRepo
   /** Wave 3c — MCP servers repo (same instance used by mcpRegistry). */
   mcpServersRepo?: McpServersRepo
+  /** FIX2 — feedback service, exposed for future coach agent tools. Optional;
+   *  not consumed by the runtime agent loop itself. */
+  feedbackService?: import('../feedback/service.js').FeedbackService
 }
 
 /**
