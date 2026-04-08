@@ -43,8 +43,16 @@ export async function handleCommand(
         `• Просто общаться с тобой — помню, что ты рассказывал\n` +
         `• Ставить напоминания в удобный канал\n` +
         `• Искать в интернете через Google\n` +
-        `• Присылать селфи по запросу\n\n` +
-        `Команды:\n` +
+        `• Присылать селфи по запросу\n` +
+        `• Распознавать фото и картинки\n\n` +
+        `Команды-помощники:\n` +
+        `/skills — мои навыки\n` +
+        `/reminders — активные напоминания\n` +
+        `/selfie [описание] — прислать селфи\n` +
+        `/tweaks — предложения по тюнингу моей персоны\n` +
+        `/candidates — кандидаты в навыки\n` +
+        `/integrations — подключённые сервисы\n\n` +
+        `Админ:\n` +
         `/status — тариф и лимит токенов\n` +
         `/plan — сменить тариф\n` +
         `/notify [telegram|max|auto] — куда писать напоминания\n` +
@@ -145,5 +153,11 @@ export async function handleCommand(
     )
   }
 
-  return fmt(`Неизвестная команда: ${cmd}\nПопробуй /help`)
+  // Unknown slash command → return null so the router falls through to the
+  // intent classifier. The classifier has its own deterministic short-circuit
+  // for newer commands like /skills, /tweaks, /reminders, /candidates, /selfie,
+  // /integrations (see intent-classifier.ts:classifySlashCommand). This keeps
+  // the legacy admin/account commands in this file and lets agent-level ones
+  // route through the normal agent pipeline.
+  return null
 }

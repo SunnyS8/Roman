@@ -111,4 +111,16 @@ describe('handleCommand unknown', () => {
     const result = await handleCommand('just a message', deps.workspace as any, deps as any)
     expect(result).toBeNull()
   })
+
+  it('returns null for unknown slash command (falls through to classifier)', async () => {
+    // New agent-level commands (/skills, /tweaks etc.) are handled by the
+    // intent classifier's deterministic short-circuit, not commands.ts. An
+    // unknown slash MUST return null so the router falls through to classifier
+    // instead of replying "Неизвестная команда".
+    const deps = mockDeps()
+    for (const cmd of ['/skills', '/tweaks', '/candidates', '/reminders', '/integrations', '/selfie', '/random_unknown']) {
+      const result = await handleCommand(cmd, deps.workspace as any, deps as any)
+      expect(result).toBeNull()
+    }
+  })
 })
