@@ -14,6 +14,21 @@ import { log } from '../observability/logger.js'
 import { withSpan } from '../observability/tracing.js'
 
 /**
+ * Normalise a tool's raw return value into the `response` field shape that
+ * Gemini's functionResponse expects. Gemini requires response to be an
+ * **object** (proto struct), not an array or primitive. A tool returning
+ * `[{...}, {...}]` (e.g. list_skills) would otherwise crash the whole turn
+ * with "Proto field is not repeating, cannot start list." Wrap arrays and
+ * primitives into `{ value: ... }` or `{ items: [...] }`.
+ */
+function normalizeToolResponse(result: unknown): Record<string, unknown> {
+  if (result === null || result === undefined) return { value: null }
+  if (Array.isArray(result)) return { items: result }
+  if (typeof result === 'object') return result as Record<string, unknown>
+  return { value: result }
+}
+
+/**
  * Retry a Gemini API call on 429 RESOURCE_EXHAUSTED with exponential backoff.
  * Vertex AI free tier allows ~5 req/min — this lets short bursts succeed.
  */
@@ -195,7 +210,7 @@ async function runWithGeminiToolsImpl(
         responseParts.push({
           functionResponse: {
             name: fc.name,
-            response: (result && typeof result === 'object' ? result : { value: result }) as any,
+            response: normalizeToolResponse(result) as any,
           },
         })
       } catch (e) {
@@ -446,9 +461,7 @@ async function runWithGeminiToolsStreamImpl(
             responseParts.push({
               functionResponse: {
                 name: fc.name,
-                response: (result && typeof result === 'object'
-                  ? result
-                  : { value: result }) as any,
+                response: normalizeToolResponse(result) as any,
               },
             })
           } catch (e) {
