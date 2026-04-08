@@ -213,8 +213,22 @@ export class Learner {
   async registerCron(boss: {
     schedule: (queue: string, cron: string, data?: unknown) => Promise<void>
     work: (queue: string, handler: () => Promise<void>) => Promise<void>
+    createQueue?: (queue: string) => Promise<void>
   }): Promise<void> {
     const queue = 'learner:nightly'
+    // pg-boss v10+ requires explicit queue creation before schedule().
+    // Older versions (<10) auto-created on work(), so guard is safe.
+    if (typeof boss.createQueue === 'function') {
+      try {
+        await boss.createQueue(queue)
+      } catch (e) {
+        // Idempotent: already exists is fine, anything else is logged.
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!/already exists/i.test(msg)) {
+          log().warn('learner: createQueue failed', { queue, error: msg })
+        }
+      }
+    }
     await boss.work(queue, async () => {
       await this.runNightly()
     })

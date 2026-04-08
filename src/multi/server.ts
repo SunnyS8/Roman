@@ -261,9 +261,22 @@ export async function startMultiServer(): Promise<void> {
       retentionHours: 168,
     })
     boss.on('error', (err: unknown) => {
-      logger.warn('pg-boss error', {
-        error: err instanceof Error ? err.message : String(err),
-      })
+      // pg-boss sometimes emits plain objects (e.g. {code, severity, ...})
+      // not Error instances. String(obj) → "[object Object]" is useless, so
+      // we JSON-stringify with a fallback.
+      let serialized: string
+      if (err instanceof Error) {
+        serialized = err.message
+      } else if (err && typeof err === 'object') {
+        try {
+          serialized = JSON.stringify(err)
+        } catch {
+          serialized = '[unserializable]'
+        }
+      } else {
+        serialized = String(err)
+      }
+      logger.warn('pg-boss error', { error: serialized })
     })
     await boss.start()
     logger.info('pg-boss started')

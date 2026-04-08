@@ -224,6 +224,17 @@ export class Coach {
       return
     }
     const queue = 'coach:nightly'
+    // pg-boss v10+ requires explicit createQueue before schedule. Idempotent.
+    if (typeof b.createQueue === 'function') {
+      try {
+        await b.createQueue(queue)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!/already exists/i.test(msg)) {
+          log().warn('coach: createQueue failed', { queue, error: msg })
+        }
+      }
+    }
     await b.work(queue, async () => {
       await this.runNightly()
     })
