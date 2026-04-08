@@ -223,7 +223,8 @@ export class Coach {
       )
       return
     }
-    const queue = 'coach:nightly'
+    // pg-boss v12: queue name can only contain [a-zA-Z0-9_\-./], NOT `:`.
+    const queue = 'coach-nightly'
     // pg-boss v10+ requires explicit createQueue before schedule. Idempotent.
     if (typeof b.createQueue === 'function') {
       try {

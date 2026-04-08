@@ -122,7 +122,8 @@ export class SkillManager {
       const cron = (s.triggerConfig as any)?.cron
       if (typeof cron !== 'string' || cron.length === 0) continue
       try {
-        await boss.schedule(`skill:${s.workspaceId}:${s.id}`, cron, {
+        // pg-boss v12: no `:` in queue names. Use hyphens instead.
+        await boss.schedule(`skill-${s.workspaceId}-${s.id}`, cron, {
           workspaceId: s.workspaceId,
           skillId: s.id,
           skillName: s.name,

@@ -215,7 +215,8 @@ export class Learner {
     work: (queue: string, handler: () => Promise<void>) => Promise<void>
     createQueue?: (queue: string) => Promise<void>
   }): Promise<void> {
-    const queue = 'learner:nightly'
+    // pg-boss v12: queue name can only contain [a-zA-Z0-9_\-./], NOT `:`.
+    const queue = 'learner-nightly'
     // pg-boss v10+ requires explicit queue creation before schedule().
     // Older versions (<10) auto-created on work(), so guard is safe.
     if (typeof boss.createQueue === 'function') {
