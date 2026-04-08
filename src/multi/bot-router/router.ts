@@ -73,6 +73,37 @@ export interface BotRouterDeps {
 
 const LINK_CODE_RE = /^\s*(\d{6})\s*$/
 
+/**
+ * Fix5: merge a coalesced batch of inbound events into one logical inbound.
+ * Exported (not a class method) so it can be unit-tested directly without
+ * standing up an entire BotRouter.
+ *
+ * Rules:
+ *  - Text: join non-empty texts in arrival order with "\n".
+ *  - Attachments: concat in arrival order; empty → undefined.
+ *  - replyToText: first non-empty wins.
+ *  - mediaGroupId: first defined wins (album events share the same id).
+ *  - Everything else is taken from the LAST event (chatId, messageId, ts).
+ */
+export function mergeInboundBatch(batch: InboundEvent[]): InboundEvent {
+  if (batch.length === 0) throw new Error('mergeInboundBatch: empty batch')
+  const last = batch[batch.length - 1]
+  const combinedText = batch
+    .map((e) => e.text ?? '')
+    .filter((t) => t.length > 0)
+    .join('\n')
+  const mergedAttachments = batch.flatMap((e) => e.attachments ?? [])
+  const replyToText = batch.map((e) => e.replyToText).find((v) => !!v)
+  const mediaGroupId = batch.map((e) => e.mediaGroupId).find((v) => !!v)
+  return {
+    ...last,
+    text: combinedText,
+    attachments: mergedAttachments.length > 0 ? mergedAttachments : undefined,
+    replyToText,
+    mediaGroupId,
+  }
+}
+
 // 2 attempts only — tools have their OWN internal retries (selfie does
 // 4 retries × 2 models = up to 8 calls). Adding router-level retry on top
 // just re-runs the entire agent loop and duplicates tool work.
@@ -222,30 +253,18 @@ export class BotRouter {
    */
   private async processBatch(batch: InboundEvent[]): Promise<void> {
     if (batch.length === 1) {
-      // Common case: just one message, no batching needed
       await this.handleInbound(batch[0])
       return
     }
-
-    // Multiple messages: combine into one logical inbound. Use the LAST event
-    // as the template (latest chatId/messageId) and concatenate all texts.
-    const last = batch[batch.length - 1]
-    const combinedText = batch
-      .map((e) => e.text ?? '')
-      .filter((t) => t.length > 0)
-      .join('\n')
-
+    const combined = mergeInboundBatch(batch)
     log().info('coalescer: processing batch', {
-      channel: last.channel,
-      userId: last.userId,
+      channel: combined.channel,
+      userId: combined.userId,
       count: batch.length,
-      combinedLen: combinedText.length,
+      combinedLen: combined.text.length,
+      attachmentCount: combined.attachments?.length ?? 0,
+      mediaGroupId: combined.mediaGroupId,
     })
-
-    const combined: InboundEvent = {
-      ...last,
-      text: combinedText,
-    }
     await this.handleInbound(combined)
   }
 
@@ -337,12 +356,21 @@ export class BotRouter {
       )
 
       // Persist user message ONCE here so retries don't duplicate it.
+      // Fix5: annotate persisted content when attachments were present so
+      // recall / fact-extractor see evidence of the image in history.
+      const attachmentCount = ev.attachments?.length ?? 0
+      const persistedContent =
+        attachmentCount > 0
+          ? (ev.text?.length
+              ? `${ev.text}\n\n[прислано ${attachmentCount} фото]`
+              : `[прислано ${attachmentCount} фото без подписи]`)
+          : ev.text
       if (this.deps.convRepo) {
         try {
           await this.deps.convRepo.append(workspace.id, {
             channel: ev.channel,
             role: 'user',
-            content: ev.text,
+            content: persistedContent,
             chatId: ev.chatId,
             externalMessageId: /^\d+$/.test(ev.messageId) ? Number(ev.messageId) : null,
           })
@@ -361,7 +389,13 @@ export class BotRouter {
       //  - normal: pass through unchanged
       // Replaces regex-based intent detection. Understands synonyms, context,
       // and ambiguity ("ну?" / "и?" → clarify instead of guessing).
-      const intent = await classifyIntent(this.deps.runBetsyDeps.gemini, ev.text)
+      // Fix5: skip intent classifier when attachments are present — empty text
+      // with a photo would otherwise trigger a "clarify" question and drop the
+      // image on the floor.
+      const intent =
+        attachmentCount > 0
+          ? ({ action: 'normal' as const } as any)
+          : await classifyIntent(this.deps.runBetsyDeps.gemini, ev.text)
       log().info('inbound: classifier', { workspaceId: workspace.id, intent: intent.action })
 
       let forceTool: string | undefined
@@ -406,6 +440,8 @@ export class BotRouter {
                   skipAppendUser: true,
                   currentChatId: ev.chatId,
                   forceTool,
+                  attachments: ev.attachments,
+                  replyToText: ev.replyToText,
                 })
               // Race the whole streaming turn against the timeout. If timeout
               // hits, both streamMessage and done are abandoned. streamMessage
@@ -479,6 +515,8 @@ export class BotRouter {
                   skipAppendUser: true,
                   currentChatId: ev.chatId,
                   forceTool,
+                  attachments: ev.attachments,
+                  replyToText: ev.replyToText,
                 }),
                 ATTEMPT_TIMEOUT_MS,
                 'runBetsy',

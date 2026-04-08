@@ -1,5 +1,12 @@
 import { Bot, type Context, InputFile, InlineKeyboard } from 'grammy'
-import type { InboundEvent, OutboundMessage, ChannelAdapter, StreamableOutbound } from './base.js'
+import type {
+  InboundEvent,
+  InboundAttachment,
+  OutboundMessage,
+  ChannelAdapter,
+  StreamableOutbound,
+} from './base.js'
+import { ATTACHMENT_MAX_BYTES } from './base.js'
 import { markdownToTelegramHTML } from './markdown-to-html.js'
 import { getFeedbackRefStore } from '../feedback/ref-store.js'
 import type { FeedbackService } from '../feedback/service.js'
@@ -53,24 +60,132 @@ async function sendHtmlOrPlainReturningId(
 }
 
 
+/**
+ * Fix5: build a lazy attachment fetcher closed over grammy's ctx.api. The
+ * fetcher downloads on demand, enforces ATTACHMENT_MAX_BYTES, and returns
+ * base64. Errors propagate so the runner can catch per-attachment.
+ */
+function makeTelegramFetcher(
+  ctx: Context,
+  fileId: string,
+  mimeType: string,
+): () => Promise<{ base64: string; mimeType: string }> {
+  return async () => {
+    // grammy's getFile returns a File object with a file_path. We build the
+    // download URL from it. The bot token lives on ctx.api.token via grammy,
+    // but accessing it directly is private; grammy exposes getFile which in
+    // modern versions returns a `file` object with a `getUrl()` helper.
+    const file: any = await (ctx.api as any).getFile(fileId)
+    // Prefer getUrl() if present (grammy >= 1.x), else compose by hand.
+    let url: string | undefined
+    if (typeof file?.getUrl === 'function') {
+      try {
+        url = file.getUrl()
+      } catch {
+        url = undefined
+      }
+    }
+    if (!url) {
+      const token = (ctx.api as any).token ?? (ctx.api as any).raw?.token
+      if (token && file?.file_path) {
+        url = `https://api.telegram.org/file/bot${token}/${file.file_path}`
+      }
+    }
+    if (!url) {
+      throw new Error('telegram attachment: could not resolve download URL')
+    }
+    const res = await fetch(url)
+    if (!res.ok) {
+      throw new Error(`telegram attachment: HTTP ${res.status}`)
+    }
+    const ab = await res.arrayBuffer()
+    if (ab.byteLength > ATTACHMENT_MAX_BYTES) {
+      throw new Error(
+        `telegram attachment: too large (${ab.byteLength} > ${ATTACHMENT_MAX_BYTES})`,
+      )
+    }
+    const base64 = Buffer.from(ab).toString('base64')
+    return { base64, mimeType }
+  }
+}
+
+/** Fix5: extract photo / document attachments from a Telegram message.
+ *  - `msg.photo` is an array of sizes; we take the largest (last).
+ *  - `msg.document` is whitelisted to image/* and application/pdf only,
+ *    anything else (zip, exe, …) is silently dropped. */
+function extractAttachments(ctx: Context): InboundAttachment[] {
+  const msg: any = ctx.message
+  if (!msg) return []
+  const out: InboundAttachment[] = []
+
+  if (Array.isArray(msg.photo) && msg.photo.length > 0) {
+    const largest = msg.photo[msg.photo.length - 1]
+    if (largest?.file_id) {
+      const mimeType = 'image/jpeg'
+      out.push({
+        kind: 'image',
+        fileId: largest.file_id,
+        mimeType,
+        fetch: makeTelegramFetcher(ctx, largest.file_id, mimeType),
+        summary: `photo ${largest.width ?? '?'}x${largest.height ?? '?'}`,
+      })
+    }
+  }
+
+  if (msg.document && typeof msg.document === 'object') {
+    const doc = msg.document
+    const mime: string | undefined = doc.mime_type
+    if (typeof mime === 'string' && (mime.startsWith('image/') || mime === 'application/pdf')) {
+      out.push({
+        kind: mime.startsWith('image/') ? 'image' : 'document',
+        fileId: doc.file_id,
+        mimeType: mime,
+        fetch: makeTelegramFetcher(ctx, doc.file_id, mime),
+        summary: `${doc.file_name ?? 'document'} (${mime})`,
+      })
+    }
+  }
+
+  return out
+}
+
 export function buildInboundFromTelegramCtx(ctx: Context): InboundEvent {
-  const msg = ctx.message!
+  const msg: any = ctx.message!
   const from = ctx.from!
   const chat = ctx.chat!
   const display =
     from.first_name?.trim() ||
     from.username ||
     String(from.id)
-  const isVoice = (msg as any).voice !== undefined
+  const isVoice = msg.voice !== undefined
+  // Fix5: prefer explicit text, then caption (photo/doc with caption).
+  const text: string = msg.text ?? msg.caption ?? ''
+
+  const attachments = extractAttachments(ctx)
+
+  // Fix5: reply-to text/caption passthrough.
+  let replyToText: string | undefined
+  const rtm = msg.reply_to_message
+  if (rtm) {
+    const rtt = rtm.text ?? rtm.caption
+    if (typeof rtt === 'string' && rtt.length > 0) replyToText = rtt
+  }
+
+  const mediaGroupId: string | undefined =
+    typeof msg.media_group_id === 'string' ? msg.media_group_id : undefined
+
   return {
     channel: 'telegram',
     chatId: String(chat.id),
     userId: String(from.id),
     userDisplay: display,
-    text: (msg as any).text ?? '',
+    text,
     messageId: String(msg.message_id),
     timestamp: new Date((msg.date ?? 0) * 1000),
     isVoiceMessage: isVoice,
+    attachments: attachments.length > 0 ? attachments : undefined,
+    mediaGroupId,
+    replyToText,
     raw: ctx,
   }
 }

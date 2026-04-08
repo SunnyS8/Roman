@@ -140,6 +140,9 @@ export interface RunBetsyDeps {
     agent: any,
     userMessage: string,
     history?: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }>,
+    /** Fix5: optional inline image/file parts (base64) appended to the
+     *  current user turn for Gemini multimodal input. */
+    inlineParts?: Array<{ inlineData: { mimeType: string; data: string } }>,
   ) => Promise<{
     text: string
     toolCalls: unknown[]
@@ -211,6 +214,83 @@ export interface RunBetsyInput {
   forceTool?: string
   /** Chat-id of the current inbound message (required for recall + chat_id plumbing). */
   currentChatId: string
+  /** Fix5: attachments (photos/documents) from the inbound message. Each has
+   *  a lazy `fetch()` — runner downloads them in parallel and forwards as
+   *  inline parts to Gemini. */
+  attachments?: import('../channels/base.js').InboundAttachment[]
+  /** Fix5: text of the message this one replies to (if any). Prepended to
+   *  userMessage as context before sending to the LLM. */
+  replyToText?: string
+}
+
+/** Fix5: total base64 bytes cap across ALL attachments in one turn. Extra
+ *  attachments over this cap are dropped with a warn — prevents a user from
+ *  sending a 10-photo 100MB album and starving the agent. */
+const TOTAL_ATTACHMENT_BASE64_CAP = 15 * 1024 * 1024 // ~11 MB raw
+
+/**
+ * Fix5: download attachments in parallel (each with its own 10 MB cap
+ * enforced by the channel adapter's fetch), then return them as Gemini
+ * inlineData parts. Individual failures are logged and skipped — the turn
+ * still goes through with whatever we managed to get.
+ */
+async function downloadAttachmentsForGemini(
+  workspaceId: string,
+  attachments: import('../channels/base.js').InboundAttachment[] | undefined,
+): Promise<Array<{ inlineData: { mimeType: string; data: string } }>> {
+  if (!attachments || attachments.length === 0) return []
+  const results = await Promise.all(
+    attachments.map(async (att) => {
+      try {
+        const { base64, mimeType } = await att.fetch()
+        return { base64, mimeType, summary: att.summary }
+      } catch (e) {
+        log().warn('attachment: fetch failed, skipping', {
+          workspaceId,
+          fileId: att.fileId,
+          error: e instanceof Error ? e.message : String(e),
+        })
+        return null
+      }
+    }),
+  )
+  const parts: Array<{ inlineData: { mimeType: string; data: string } }> = []
+  let totalBytes = 0
+  for (const r of results) {
+    if (!r) continue
+    const nextTotal = totalBytes + r.base64.length
+    if (nextTotal > TOTAL_ATTACHMENT_BASE64_CAP) {
+      log().warn('attachment: total cap hit, dropping remaining', {
+        workspaceId,
+        totalBytes,
+        capBytes: TOTAL_ATTACHMENT_BASE64_CAP,
+      })
+      break
+    }
+    totalBytes = nextTotal
+    parts.push({ inlineData: { mimeType: r.mimeType, data: r.base64 } })
+  }
+  return parts
+}
+
+/** Fix5: compose the final userMessage forwarded to Gemini, given optional
+ *  reply context, attachments, and the raw user text. */
+function composeUserMessage(input: {
+  userMessage: string
+  replyToText?: string
+  attachmentCount: number
+}): string {
+  let text = input.userMessage ?? ''
+  if (input.attachmentCount > 0 && (!text || text.trim().length === 0)) {
+    text = '(пользователь прислал фото без подписи)'
+  } else if (input.attachmentCount > 0) {
+    text = `${text}\n\n(прислано ${input.attachmentCount} фото)`
+  }
+  if (input.replyToText && input.replyToText.trim().length > 0) {
+    const quoted = input.replyToText.slice(0, 500)
+    text = `[В ответ на: ${quoted}]\n\n${text}`
+  }
+  return text
 }
 
 export interface BetsyResponse {
@@ -240,8 +320,19 @@ export async function runBetsy(input: RunBetsyInput): Promise<BetsyResponse> {
 }
 
 async function runBetsyImpl(input: RunBetsyInput): Promise<BetsyResponse> {
-  const { workspaceId, userMessage, channel, deps } = input
+  const { workspaceId, channel, deps } = input
   const ttsSpeak = deps.ttsSpeak ?? realSpeak
+
+  // Fix5: compose effective userMessage with reply-context / attachments note.
+  const attachmentCount = input.attachments?.length ?? 0
+  const userMessage = composeUserMessage({
+    userMessage: input.userMessage,
+    replyToText: input.replyToText,
+    attachmentCount,
+  })
+  // Fix5: download attachments in parallel, enforce per-file 10 MB cap and
+  // overall cap. Failures skip individual attachments.
+  const inlineParts = await downloadAttachmentsForGemini(workspaceId, input.attachments)
 
   const workspace = await deps.wsRepo.findById(workspaceId)
   if (!workspace) throw new Error(`workspace not found: ${workspaceId}`)
@@ -332,7 +423,7 @@ async function runBetsyImpl(input: RunBetsyInput): Promise<BetsyResponse> {
 
   let result: { text: string; toolCalls: unknown[]; tokensUsed: number }
   try {
-    result = await deps.agentRunner(agent, userMessage, context.history)
+    result = await deps.agentRunner(agent, userMessage, context.history, inlineParts)
     log().info('runBetsy: agent done', {
       workspaceId,
       textLen: result.text?.length ?? 0,
@@ -490,7 +581,16 @@ export async function runBetsyStream(input: RunBetsyInput): Promise<RunBetsyStre
 }
 
 async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamResult> {
-  const { workspaceId, userMessage, channel, deps } = input
+  const { workspaceId, channel, deps } = input
+
+  // Fix5: compose + download attachments (see runBetsy above).
+  const attachmentCount = input.attachments?.length ?? 0
+  const userMessage = composeUserMessage({
+    userMessage: input.userMessage,
+    replyToText: input.replyToText,
+    attachmentCount,
+  })
+  const inlineParts = await downloadAttachmentsForGemini(workspaceId, input.attachments)
 
   const workspace = await deps.wsRepo.findById(workspaceId)
   if (!workspace) throw new Error(`workspace not found: ${workspaceId}`)
@@ -580,7 +680,7 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
     agent,
     userMessage,
     context.history,
-    { forceTool: input.forceTool },
+    { forceTool: input.forceTool, inlineParts },
   )
 
   // Wrap raw stream so the consumer can iterate exactly once and we still get
