@@ -34,6 +34,9 @@ import { createRecallTools } from './tools/recall-tools.js'
 import { createSkillTools } from '../skills/skill-tool.js'
 import { createLearnerTools } from '../learner/learner-tools.js'
 import type { CandidatesRepo } from '../learner/candidates-repo.js'
+// Fix3 — CoachAgent: persona tweak proposal tools (list/show/approve/reject).
+import { createCoachTools } from '../coach/coach-tools.js'
+import type { ProposalsRepo as CoachProposalsRepo } from '../coach/proposals-repo.js'
 // WAVE3C-MERGE: oauth integration tools
 import { createOAuthTools, type OAuthToolsDeps } from '../oauth/oauth-tools.js'
 import {
@@ -60,6 +63,10 @@ export interface BuildRootToolsDeps {
   /** Wave 2A — LearnerAgent candidates repo. When present, root agent gets
    *  list/approve/reject candidate tools. */
   learnerCandidatesRepo?: CandidatesRepo
+  /** Fix3 — CoachAgent proposals repo. When present (and personaRepo is
+   *  already in deps), root agent gets list/show/approve/reject persona
+   *  tweak tools. Sub-agents never see these. */
+  coachProposalsRepo?: CoachProposalsRepo
 }
 
 export interface BuildRootToolsOptions {
@@ -204,7 +211,17 @@ export function buildRootTools(
     ? createOAuthTools(options.oauthToolsDeps)
     : []
 
-  const extraTools: MemoryTool[] = [...learnerTools, ...oauthTools]
+  // Fix3 — coach persona tweak tools (root-only, opt-in). Requires both a
+  // proposals repo AND the persona repo to apply approvals.
+  const coachTools: MemoryTool[] = deps.coachProposalsRepo
+    ? createCoachTools({
+        workspaceId,
+        proposalsRepo: deps.coachProposalsRepo,
+        personaRepo: deps.personaRepo,
+      })
+    : []
+
+  const extraTools: MemoryTool[] = [...learnerTools, ...oauthTools, ...coachTools]
 
   const allRootTools: MemoryTool[] = [
     ...leafTools,

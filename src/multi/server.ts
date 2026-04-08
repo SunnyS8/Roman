@@ -38,6 +38,7 @@ import { CandidatesRepo as LearnerCandidatesRepo } from './learner/candidates-re
 // are actually recorded. Wave 2C built the infrastructure but server.ts never
 // instantiated the service, so channel.setFeedbackService(undefined) was a silent no-op.
 import { FeedbackRepo } from './feedback/repo.js'
+import { ProposalsRepo as CoachProposalsRepo } from './coach/proposals-repo.js'
 import { FeedbackService } from './feedback/service.js'
 
 export async function startMultiServer(): Promise<void> {
@@ -193,6 +194,11 @@ export async function startMultiServer(): Promise<void> {
     learnerCandidatesRepo,
     // FIX2: expose feedback service to runner deps so future coach tools can query.
     feedbackService,
+    // Fix3: CoachAgent persona tweak proposals — wires list/show/approve/reject
+    // persona tweak tools onto the root agent. Nightly runner (pg-boss cron)
+    // is not registered here yet — pg-boss isn't initialised in server.ts (see
+    // learner cron TODO above).
+    coachProposalsRepo: new CoachProposalsRepo(pool),
   }
 
   const router = new BotRouter({
