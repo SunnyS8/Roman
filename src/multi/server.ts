@@ -190,8 +190,11 @@ export async function startMultiServer(): Promise<void> {
       agent: any,
       userMessage: string,
       history?: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }>,
+      inlineParts?: Array<{ inlineData: { mimeType: string; data: string } }>,
     ) => {
-      return runWithGeminiTools(getGemini(), agent, userMessage, history ?? [])
+      return runWithGeminiTools(getGemini(), agent, userMessage, history ?? [], {
+        inlineParts,
+      })
     },
     mcpRegistry,
     oauthRepo,

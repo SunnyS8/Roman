@@ -101,15 +101,24 @@ function toFunctionDeclaration(tool: MemoryTool): any {
   }
 }
 
+/** Fix5: inline image/file parts appended to the current user turn so Gemini
+ *  multimodal models (2.5-flash/pro) can "see" attachments. Each entry must
+ *  already be base64-encoded bytes. Caller (runner.ts) is responsible for
+ *  enforcing download caps; this layer just pipes bytes through. */
+export interface InlineDataPart {
+  inlineData: { mimeType: string; data: string }
+}
+
 export async function runWithGeminiTools(
   gemini: GoogleGenAI,
   agent: any,
   userMessage: string,
   history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = [],
+  options: { inlineParts?: InlineDataPart[] } = {},
 ): Promise<GeminiRunResult> {
   return withSpan(
     'betsy.gemini.run',
-    () => runWithGeminiToolsImpl(gemini, agent, userMessage, history),
+    () => runWithGeminiToolsImpl(gemini, agent, userMessage, history, options),
     {
       model:
         typeof (agent as any)?.model === 'string'
@@ -126,6 +135,7 @@ async function runWithGeminiToolsImpl(
   agent: any,
   userMessage: string,
   history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> = [],
+  options: { inlineParts?: InlineDataPart[] } = {},
 ): Promise<GeminiRunResult> {
   const instruction: string = (agent as any).instruction ?? ''
   const rawModel = (agent as any).model
@@ -148,7 +158,11 @@ async function runWithGeminiToolsImpl(
     if (t.role === 'user') contents.push({ role: 'user', parts: [{ text: t.content }] })
     else if (t.role === 'assistant') contents.push({ role: 'model', parts: [{ text: t.content }] })
   }
-  contents.push({ role: 'user', parts: [{ text: userMessage }] })
+  {
+    const userParts: any[] = [{ text: userMessage }]
+    for (const ip of options.inlineParts ?? []) userParts.push(ip)
+    contents.push({ role: 'user', parts: userParts })
+  }
   const toolCalls: GeminiRunResult['toolCalls'] = []
   let totalTokens = 0
   let finalText = ''
@@ -263,6 +277,9 @@ export interface RunStreamOptions {
    *  `allowed_function_names`. After the tool returns, force is dropped
    *  so the model can write a free-form text response. */
   forceTool?: string
+  /** Fix5: image/document bytes appended to the current user turn so
+   *  Gemini multimodal models can see the attachments. */
+  inlineParts?: InlineDataPart[]
 }
 
 export async function runWithGeminiToolsStream(
@@ -320,7 +337,11 @@ async function runWithGeminiToolsStreamImpl(
     }
     // skip tool — those responses live in past tool-loop state, not user-visible context
   }
-  contents.push({ role: 'user', parts: [{ text: userMessage }] })
+  {
+    const userParts: any[] = [{ text: userMessage }]
+    for (const ip of options.inlineParts ?? []) userParts.push(ip)
+    contents.push({ role: 'user', parts: userParts })
+  }
   const collectedToolCalls: GeminiRunResult['toolCalls'] = []
   let totalTokens = 0
   let finalText = ''
