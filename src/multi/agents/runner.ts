@@ -11,6 +11,7 @@ import { createRunContext } from './run-context.js'
 import { buildRootTools } from './root-tools.js'
 import type { SkillManager } from '../skills/manager.js'
 import type { CandidatesRepo as LearnerCandidatesRepo } from '../learner/candidates-repo.js'
+import type { ProposalsRepo as CoachProposalsRepo } from '../coach/proposals-repo.js'
 import { speak as realSpeak } from '../gemini/tts.js'
 import { runWithGeminiToolsStream } from './gemini-runner.js'
 import { log } from '../observability/logger.js'
@@ -157,6 +158,9 @@ export interface RunBetsyDeps {
   /** Wave 2A — LearnerAgent candidate repo. Optional; when wired, the root
    *  agent exposes list/approve/reject candidate tools. */
   learnerCandidatesRepo?: LearnerCandidatesRepo
+  /** Fix3 — CoachAgent persona tweak proposals repo. Optional; when wired,
+   *  the root agent exposes list/show/approve/reject persona tweak tools. */
+  coachProposalsRepo?: CoachProposalsRepo
   /** Wave 2B — optional pre-send critic. Only invoked from runBetsy
    *  (non-stream path) when BC_CRITIC_ENABLED=1 is set. Stream path skips the
    *  critic. Fail-open: critic errors never block a reply. */
