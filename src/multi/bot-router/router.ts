@@ -393,7 +393,7 @@ export class BotRouter {
           try {
             if (canStream) {
               log().info('routing: runBetsyStream attempt', { workspaceId: workspace.id, attempt })
-              const { textStream, done, replyToPromise, assistantRowIdPromise } =
+              const { textStream, done, replyToPromise, assistantRowIdPromise, finalTextPromise } =
                 await this.deps.runBetsyStreamFn!({
                   workspaceId: workspace.id,
                   userMessage: ev.text,
@@ -412,6 +412,7 @@ export class BotRouter {
                   chatId: ev.chatId,
                   textStream,
                   replyToPromise,
+                  finalTextOverride: finalTextPromise, // FIX1: post-stream critic
                 })
                 const d = await done
                 const rowId = await assistantRowIdPromise
