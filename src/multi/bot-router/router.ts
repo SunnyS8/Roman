@@ -399,25 +399,16 @@ export class BotRouter {
       log().info('inbound: classifier', { workspaceId: workspace.id, intent: intent.action })
 
       let forceTool: string | undefined
+      // FIX6: clarify branch REMOVED. Classifier has no history, so any
+      // "clarifying question" is a blind guess that throws away the user's
+      // actual message. User said "да" → classifier without history can only
+      // respond "что именно?" which is wrong 100% of the time when there was
+      // a pending question from Бэтси. Always let the agent (with full
+      // history) handle ambiguous inputs.
       if (intent.action === 'clarify') {
-        // User message already persisted above. Just append the clarification
-        // as the assistant turn and skip the main agent loop entirely.
-        if (this.deps.convRepo) {
-          try {
-            await this.deps.convRepo.append(workspace.id, {
-              channel: ev.channel,
-              role: 'assistant',
-              content: intent.question,
-            } as any)
-          } catch (e) {
-            log().error('inbound: failed to persist clarify reply', {
-              workspaceId: workspace.id,
-              error: e instanceof Error ? e.message : String(e),
-            })
-          }
-        }
-        await channel.sendMessage({ chatId: ev.chatId, text: intent.question })
-        return
+        log().warn('inbound: clarify from classifier ignored, falling through to agent', {
+          workspaceId: workspace.id,
+        })
       }
       if (intent.action === 'force_tool') {
         forceTool = intent.tool

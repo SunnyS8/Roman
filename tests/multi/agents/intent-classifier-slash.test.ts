@@ -69,15 +69,16 @@ describe('classifyIntent — slash short-circuit', () => {
     })
   })
 
-  it('/start → clarify with greeting', async () => {
+  it('/start → normal (main agent handles greeting with persona)', async () => {
+    // FIX6: /start no longer hard-codes a greeting — it falls through to
+    // the main agent so Бэтси answers in her own voice with full context.
     const r = await classifyIntent(FAILING_GEMINI, '/start')
-    expect(r.action).toBe('clarify')
-    expect('question' in r && r.question).toContain('Бэтси')
+    expect(r.action).toBe('normal')
   })
 
-  it('/help → clarify with help text', async () => {
+  it('/help → normal (main agent handles help)', async () => {
     const r = await classifyIntent(FAILING_GEMINI, '/help')
-    expect(r.action).toBe('clarify')
+    expect(r.action).toBe('normal')
   })
 
   it('/tweaks@BetsyBot → still works (strips bot suffix)', async () => {
@@ -96,6 +97,24 @@ describe('classifyIntent — slash short-circuit', () => {
     const r = await classifyIntent(mockGemini, '/unknownCommand')
     expect(r.action).toBe('normal')
     expect(mockGemini.models.generateContent).toHaveBeenCalledOnce()
+  })
+
+  it('FIX6: clarify from LLM is downgraded to normal', async () => {
+    // Regression: classifier has no history, so any clarifying question
+    // it invents will be a wrong blind guess. If LLM still emits
+    // action:clarify (e.g. prompt drift), downgrade to normal so the main
+    // agent (with history) handles the reply. The specific user bug was
+    // «Бэтси: Подключить Gmail?» → «Костя: да» → classifier sees only "да"
+    // → returns clarify «что именно?» → router skips agent → wrong reply.
+    const mockGemini = {
+      models: {
+        generateContent: vi.fn().mockResolvedValue({
+          text: '{"action":"clarify","question":"что именно?"}',
+        }),
+      },
+    } as any
+    const r = await classifyIntent(mockGemini, 'да')
+    expect(r.action).toBe('normal')
   })
 
   it('plain text without slash → not short-circuited, hits LLM', async () => {
