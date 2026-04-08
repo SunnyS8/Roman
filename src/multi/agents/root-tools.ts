@@ -84,7 +84,12 @@ export interface RootToolBundle {
   delegationTools: MemoryTool[]
   /** run_skill / list_skills — root-only. May be empty if no SkillManager. */
   skillTools: MemoryTool[]
-  /** Concatenation passed to the root agent. */
+  /** Learner candidate + OAuth integration tools — root-only opt-in extras.
+   *  Kept as a separate bucket so the runner explicitly forwards them; the
+   *  previous design only put them into `allRootTools`, which was consumed
+   *  by sims but silently dropped by the real runner (B1 audit fix). */
+  extraTools: MemoryTool[]
+  /** Concatenation of all of the above. Used by sims and the eval harness. */
   allRootTools: MemoryTool[]
 }
 
@@ -199,13 +204,14 @@ export function buildRootTools(
     ? createOAuthTools(options.oauthToolsDeps)
     : []
 
+  const extraTools: MemoryTool[] = [...learnerTools, ...oauthTools]
+
   const allRootTools: MemoryTool[] = [
     ...leafTools,
     ...delegationTools,
     ...skillTools,
-    ...learnerTools,
-    ...oauthTools,
+    ...extraTools,
   ]
 
-  return { leafTools, delegationTools, skillTools, allRootTools }
+  return { leafTools, delegationTools, skillTools, extraTools, allRootTools }
 }

@@ -289,6 +289,7 @@ async function runBetsyImpl(input: RunBetsyInput): Promise<BetsyResponse> {
       reminderTools: [],
       delegationTools: bundle.delegationTools,
       skillTools: bundle.skillTools,
+      extraTools: bundle.extraTools,
     },
     currentChannel: channel,
   })
@@ -530,6 +531,7 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
       reminderTools: [],
       delegationTools: bundle.delegationTools,
       skillTools: bundle.skillTools,
+      extraTools: bundle.extraTools,
     },
     currentChannel: channel,
   })

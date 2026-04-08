@@ -20,6 +20,12 @@ export interface BetsyTools {
   /** Wave 1C — run_skill / list_skills. Pre-built and passed in by the runner
    *  so the factory does not need a SkillManager dependency. */
   skillTools?: MemoryTool[]
+  /** Wave 2A learner candidate tools + Wave 3C oauth integration tools.
+   *  Bundled together as "extras" so the runner can forward them in one
+   *  bucket. Both are root-only and opt-in (absent when their deps aren't
+   *  wired). Audit fix B1: previously these were dropped on the floor by
+   *  the runner because the factory had no slot for them. */
+  extraTools?: MemoryTool[]
 }
 
 export interface CreateBetsyAgentInput {
@@ -70,6 +76,7 @@ export function createBetsyAgent(input: CreateBetsyAgentInput): any {
     ...(tools.mcpTools ?? []),
     ...(tools.delegationTools ?? []),
     ...(tools.skillTools ?? []),
+    ...(tools.extraTools ?? []),
   ]
 
   return new (LlmAgent as any)({
