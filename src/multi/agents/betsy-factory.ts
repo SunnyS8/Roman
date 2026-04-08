@@ -1,4 +1,4 @@
-import { LlmAgent } from '@google/adk'
+import { LlmAgent } from './llm-agent.js'
 import { buildSystemPromptForWorkspace } from './prompt-builder.js'
 import type { Workspace } from '../workspaces/types.js'
 import type { Persona } from '../personas/types.js'
