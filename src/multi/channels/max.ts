@@ -123,8 +123,25 @@ export class MaxAdapter implements ChannelAdapter {
     for await (const accumulated of msg.textStream) {
       if (accumulated) lastText = accumulated
     }
-    if (lastText) {
-      return this.sendMessage({ chatId: msg.chatId, text: lastText })
+    // Fix1: post-stream critic — apply finalTextOverride if present.
+    let finalText = lastText
+    if (msg.finalTextOverride) {
+      try {
+        const overridden = await Promise.race([
+          msg.finalTextOverride,
+          new Promise<string>((_, rej) =>
+            setTimeout(() => rej(new Error('finalTextOverride timeout')), 12_000),
+          ),
+        ])
+        if (typeof overridden === 'string' && overridden.trim().length > 0) {
+          finalText = overridden
+        }
+      } catch {
+        // fail-open: stick with lastText
+      }
+    }
+    if (finalText) {
+      return this.sendMessage({ chatId: msg.chatId, text: finalText })
     }
     return {}
   }

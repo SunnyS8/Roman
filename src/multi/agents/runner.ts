@@ -450,6 +450,10 @@ export interface RunBetsyStreamResult {
   /** The bc_conversation row id of the assistant message once it has been
    *  persisted. */
   assistantRowIdPromise: Promise<string | undefined>
+  /** Fix1: resolves with the final text the channel adapter should actually
+   *  send (post-stream critic-applied if applicable). On any failure resolves
+   *  with '' so the channel falls back to its lastText. Always resolves. */
+  finalTextPromise: Promise<string>
 }
 
 /**
@@ -530,12 +534,9 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
     currentChannel: channel,
   })
 
-  // WAVE2-MERGE: Wave 2B — stream path intentionally skips the critic because
-  // the user is already seeing tokens arrive. WAVE3-TODO: post-stream review
-  // with an edit/amend message emitted by the channel adapter.
-  if (deps.critic && process.env.BC_CRITIC_ENABLED === '1') {
-    log().info('critic: skipped (streaming path)', { workspaceId })
-  }
+  // Fix1: stream path now supports post-stream critic. Telegram streams via
+  // sendMessageDraft (invisible preview), so the real send happens after the
+  // stream ends — there is a window to apply critic rewrites without UX loss.
 
   log().info('runBetsyStream: agent built', {
     workspaceId,
@@ -587,11 +588,15 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
   // before its final send.
   let resolveReply!: (v: number | undefined) => void
   let resolveRowId!: (v: string | undefined) => void
+  let resolveFinalText!: (v: string) => void
   const replyToPromise: Promise<number | undefined> = new Promise((r) => {
     resolveReply = r
   })
   const assistantRowIdPromise: Promise<string | undefined> = new Promise((r) => {
     resolveRowId = r
+  })
+  const finalTextPromise: Promise<string> = new Promise((r) => {
+    resolveFinalText = r
   })
 
   const done = (async () => {
@@ -601,6 +606,8 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
     } catch (e) {
       resolveReply(undefined)
       resolveRowId(undefined)
+      // Fail-open for the channel adapter: empty string => use lastText.
+      resolveFinalText('')
       throw e
     }
     // Agent loop is done — the reply target is now stable.
@@ -614,12 +621,58 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
       replyTo: runContext.replyTarget,
     })
 
+    // Fix1: post-stream critic. Applied BEFORE persistence + before resolving
+    // finalTextPromise, so the assistant row, fact-extractor and final send
+    // all see the same (potentially rewritten) text. Fail-open.
+    let finalText = result.text
+    if (deps.critic && process.env.BC_CRITIC_ENABLED === '1') {
+      try {
+        const review = await deps.critic.review({
+          draftResponse: result.text,
+          userMessage,
+          personaPrompt: persona.personalityPrompt ?? '',
+          ownerFacts: context.factContents.slice(0, 10),
+          channel,
+        })
+        log().info('critic: reviewed (stream)', {
+          workspaceId,
+          ok: review.ok,
+          issueCount: review.issues.length,
+          ms: review.durationMs,
+        })
+        const decision = shouldApplySuggestion(result.text, review)
+        if (decision.apply && review.suggested) {
+          finalText = review.suggested
+          log().info('critic: applied suggestion (stream)', {
+            workspaceId,
+            origLen: result.text.length,
+            newLen: finalText.length,
+          })
+        } else if (!review.ok) {
+          log().warn('critic: issues but not applying (stream)', {
+            workspaceId,
+            reason: decision.reason,
+            issues: review.issues,
+          })
+        }
+      } catch (e) {
+        log().warn('critic: failed in stream path, sending original', {
+          workspaceId,
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }
+    }
+    // Mutate result.text so downstream (append, extractor, return) see the
+    // critic-applied final text.
+    result.text = finalText
+    resolveFinalText(finalText)
+
     let assistantRowId: string | undefined
     try {
       const row = await deps.convRepo.append(workspaceId, {
         channel,
         role: 'assistant',
-        content: result.text,
+        content: finalText,
         toolCalls: result.toolCalls,
         tokensUsed: result.tokensUsed,
         chatId: input.currentChatId,
@@ -636,7 +689,7 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
     }
 
     fireAndForgetSummarize(deps, workspaceId)
-    fireAndForgetExtract(deps, workspaceId, userMessage, result.text)
+    fireAndForgetExtract(deps, workspaceId, userMessage, finalText)
     fireAndForgetBackfillEmbeddings(deps, workspaceId)
 
     if (mcpLoaded) {
@@ -644,12 +697,18 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
     }
 
     return {
-      text: result.text,
+      text: finalText,
       toolCalls: result.toolCalls,
       tokensUsed: result.tokensUsed,
       replyTo: runContext.replyTarget,
     }
   })()
 
-  return { textStream: wrappedStream, done, replyToPromise, assistantRowIdPromise }
+  return {
+    textStream: wrappedStream,
+    done,
+    replyToPromise,
+    assistantRowIdPromise,
+    finalTextPromise,
+  }
 }

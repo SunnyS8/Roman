@@ -169,49 +169,7 @@ describe('runBetsy + Critic integration', () => {
     expect(res.text).toBe('original draft reply')
   })
 
-  it('runBetsyStream does NOT call critic even with flag on', async () => {
-    process.env.BC_CRITIC_ENABLED = '1'
-    const critic = fakeCritic({ ok: false, suggested: 'rewritten' })
-
-    // Stream path uses runWithGeminiToolsStream — mock gemini minimally so
-    // the path reaches the skip-critic log without exploding. We only care
-    // that critic.review is never called; stream failure downstream is fine.
-    const deps = mockDeps({
-      critic,
-      gemini: {
-        models: {
-          generateContentStream: vi.fn(async () => {
-            throw new Error('stream not needed for this assertion')
-          }),
-          generateContent: vi.fn(async () => ({ text: '' })),
-        },
-      },
-    })
-
-    let stream: any
-    try {
-      stream = await runBetsyStream({
-        workspaceId: 'ws1',
-        userMessage: 'hi',
-        channel: 'telegram',
-        currentChatId: 'c1',
-        deps: deps as any,
-      })
-    } catch {
-      // stream wiring may throw; irrelevant — we assert on the critic below.
-    }
-    // Drain the exposed promises so we don't leak an unhandled rejection.
-    if (stream) {
-      await Promise.allSettled([stream.done, stream.replyToPromise, stream.assistantRowIdPromise])
-      // Also drain the stream iterable
-      try {
-        for await (const _ of stream.textStream) {
-          // noop
-        }
-      } catch {
-        // expected
-      }
-    }
-    expect(critic.review).not.toHaveBeenCalled()
-  })
+  // Fix1: stream path now SUPPORTS post-stream critic. The legacy "skip"
+  // assertion was removed; new behavior is fully covered in
+  // runner-stream-critic.test.ts.
 })

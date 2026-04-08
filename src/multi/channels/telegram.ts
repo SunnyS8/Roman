@@ -3,6 +3,13 @@ import type { InboundEvent, OutboundMessage, ChannelAdapter, StreamableOutbound 
 import { markdownToTelegramHTML } from './markdown-to-html.js'
 import { getFeedbackRefStore } from '../feedback/ref-store.js'
 import type { FeedbackService } from '../feedback/service.js'
+import { log } from '../observability/logger.js'
+
+/** Fix1: max time we will wait for a finalTextOverride promise. Exported so
+ *  tests can override via process.env or by importing the constant. */
+export const FINAL_TEXT_OVERRIDE_TIMEOUT_MS = Number(
+  process.env.BC_FINAL_TEXT_OVERRIDE_TIMEOUT_MS ?? 12_000,
+)
 
 /** Wave 2C: Build an inline [👍][👎] keyboard whose buttons encode `refId`
  *  in their callback_data. The refId must be short (we use 12 hex chars,
@@ -290,7 +297,34 @@ export class TelegramAdapter implements ChannelAdapter {
       }
     }
 
-    const finalText = lastText.length > 4096 ? lastText.slice(0, 4096) : lastText
+    // Fix1: post-stream critic. If caller provided a finalTextOverride promise,
+    // wait (bounded) for its resolved value and use it instead of the last
+    // streamed chunk. Fail-open on any error / timeout / empty string.
+    let finalText = lastText.length > 4096 ? lastText.slice(0, 4096) : lastText
+    if (msg.finalTextOverride) {
+      try {
+        const overridden = await Promise.race([
+          msg.finalTextOverride,
+          new Promise<string>((_, rej) =>
+            setTimeout(
+              () => rej(new Error('finalTextOverride timeout')),
+              FINAL_TEXT_OVERRIDE_TIMEOUT_MS,
+            ),
+          ),
+        ])
+        if (typeof overridden === 'string' && overridden.trim().length > 0) {
+          finalText = overridden.length > 4096 ? overridden.slice(0, 4096) : overridden
+          log().info('telegram: applied finalTextOverride', {
+            origLen: lastText.length,
+            finalLen: finalText.length,
+          })
+        }
+      } catch (e) {
+        log().warn('telegram: finalTextOverride failed, using stream tail', {
+          error: e instanceof Error ? e.message : String(e),
+        })
+      }
+    }
     const replyParams =
       replyTo != null
         ? {

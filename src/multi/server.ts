@@ -25,6 +25,15 @@ import { McpServersRepo } from './agents/mcp/repo.js'
 import { McpRegistry } from './agents/mcp/registry.js'
 import { OAuthResolver } from './agents/mcp/oauth-resolver.js'
 import { createRelayCallbackHandler } from './oauth/relay-callback.js'
+// FIX1: post-stream critic wiring (previously never instantiated).
+import { Critic } from './critic/critic.js'
+// FIX1.5: Wave 1C/2A wiring gaps — SkillManager and Learner CandidatesRepo
+// were imported in runner.ts but never instantiated in server.ts, so
+// run_skill/list_skills and list/approve/reject_skill_candidate tools
+// silently disappeared from the root agent.
+import { SkillsRepo } from './skills/repo.js'
+import { SkillManager } from './skills/manager.js'
+import { CandidatesRepo as LearnerCandidatesRepo } from './learner/candidates-repo.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -129,6 +138,19 @@ export async function startMultiServer(): Promise<void> {
     oauthResolver,
   })
 
+  // FIX1.5: Wave 1C — per-workspace YAML skills. SkillManager needs a repo
+  // (thin wrapper around `pool`) and a SkillLogger — pino's log() satisfies
+  // the {info,warn,error} shape structurally.
+  const skillsRepo = new SkillsRepo(pool)
+  const skillManager = new SkillManager({ repo: skillsRepo, logger: log() })
+  // FIX1.5: register skill cron triggers when boss is in scope — pg-boss is
+  // not initialized in server.ts today, so nothing to register here yet.
+
+  // FIX1.5: Wave 2A — Learner candidates repo, exposed via list/approve/reject
+  // skill candidate tools on the root agent.
+  const learnerCandidatesRepo = new LearnerCandidatesRepo(pool)
+  // FIX1.5: register learner cron triggers when boss is in scope (see above).
+
   // Bot router with runBetsy agent runner
   const runBetsyDeps = {
     wsRepo,
@@ -148,6 +170,12 @@ export async function startMultiServer(): Promise<void> {
     mcpRegistry,
     oauthRepo,
     mcpServersRepo,
+    // FIX1: instantiate Critic so BC_CRITIC_ENABLED=1 actually has effect in
+    // both runBetsy and runBetsyStream paths. Fail-open by design.
+    critic: new Critic({ gemini: getGemini() }),
+    // FIX1.5: close Wave 1C / 2A wiring gaps.
+    skillManager,
+    learnerCandidatesRepo,
   }
 
   const router = new BotRouter({

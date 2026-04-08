@@ -44,6 +44,13 @@ export interface StreamableOutbound {
   replyToPromise?: Promise<number | undefined>
   /** See OutboundMessage.feedbackRefId. Wave 2C. */
   feedbackRefId?: string
+  /** Fix1 (post-stream critic): if set, the channel does NOT use the last
+   *  textStream chunk as the final message. Instead it awaits this promise
+   *  (with a short timeout) and uses its resolved value as the final text.
+   *  Used to inject post-stream critic rewrites without edits or UX loss.
+   *  Fail-open: any error / timeout / empty value falls back to the
+   *  last yielded stream value. */
+  finalTextOverride?: Promise<string>
 }
 
 export interface ChannelAdapter {
