@@ -114,6 +114,29 @@ export class TelegramAdapter implements ChannelAdapter {
       await handleFeedbackCallback(ctx, this.feedbackService)
     })
 
+    // Set the native Telegram bot menu commands (the list that shows up
+    // when the user taps "/" or the menu icon). These are just shortcuts
+    // that inject a canonical Russian phrase into the inbound handler — the
+    // intent classifier then routes them to the right tool.
+    // Failure is non-fatal: some test environments don't allow setMyCommands.
+    void this.bot.api
+      .setMyCommands([
+        { command: 'start', description: 'Начать диалог с Бэтси' },
+        { command: 'help', description: 'Что я умею' },
+        { command: 'tweaks', description: '🧠 Предложения по тюнингу персоны' },
+        { command: 'candidates', description: '✨ Кандидаты в навыки (от Learner)' },
+        { command: 'skills', description: '📋 Мои навыки' },
+        { command: 'reminders', description: '⏰ Активные напоминания' },
+        { command: 'selfie', description: '📸 Прислать селфи' },
+        { command: 'integrations', description: '🔌 Подключённые сервисы' },
+      ])
+      .then(() => log().info('telegram: menu commands set'))
+      .catch((e) =>
+        log().warn('telegram: setMyCommands failed', {
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      )
+
     // Fire-and-forget bot start; long polling runs in background
     void this.bot.start()
   }
