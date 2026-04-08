@@ -67,33 +67,31 @@ async function sendHtmlOrPlainReturningId(
  */
 function makeTelegramFetcher(
   ctx: Context,
+  botToken: string,
   fileId: string,
   mimeType: string,
 ): () => Promise<{ base64: string; mimeType: string }> {
   return async () => {
-    // grammy's getFile returns a File object with a file_path. We build the
-    // download URL from it. The bot token lives on ctx.api.token via grammy,
-    // but accessing it directly is private; grammy exposes getFile which in
-    // modern versions returns a `file` object with a `getUrl()` helper.
-    const file: any = await (ctx.api as any).getFile(fileId)
-    // Prefer getUrl() if present (grammy >= 1.x), else compose by hand.
-    let url: string | undefined
-    if (typeof file?.getUrl === 'function') {
-      try {
-        url = file.getUrl()
-      } catch {
-        url = undefined
-      }
+    // grammy's ctx.api.getFile(fileId) returns a File with a file_path string
+    // ("photos/file_123.jpg"). The bot token is not publicly exposed by
+    // grammy's Api class, so we capture it in the adapter constructor and
+    // close over it here. Manual URL composition per Bot API docs:
+    //   https://api.telegram.org/file/bot<token>/<file_path>
+    log().info('telegram attachment: fetch start', { fileId })
+    let file: any
+    try {
+      file = await (ctx.api as any).getFile(fileId)
+    } catch (e) {
+      log().warn('telegram attachment: getFile failed', {
+        fileId,
+        error: e instanceof Error ? e.message : String(e),
+      })
+      throw e
     }
-    if (!url) {
-      const token = (ctx.api as any).token ?? (ctx.api as any).raw?.token
-      if (token && file?.file_path) {
-        url = `https://api.telegram.org/file/bot${token}/${file.file_path}`
-      }
+    if (!file?.file_path) {
+      throw new Error('telegram attachment: no file_path in File object')
     }
-    if (!url) {
-      throw new Error('telegram attachment: could not resolve download URL')
-    }
+    const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`
     const res = await fetch(url)
     if (!res.ok) {
       throw new Error(`telegram attachment: HTTP ${res.status}`)
@@ -105,6 +103,11 @@ function makeTelegramFetcher(
       )
     }
     const base64 = Buffer.from(ab).toString('base64')
+    log().info('telegram attachment: fetch ok', {
+      fileId,
+      bytes: ab.byteLength,
+      mimeType,
+    })
     return { base64, mimeType }
   }
 }
@@ -112,8 +115,10 @@ function makeTelegramFetcher(
 /** Fix5: extract photo / document attachments from a Telegram message.
  *  - `msg.photo` is an array of sizes; we take the largest (last).
  *  - `msg.document` is whitelisted to image/* and application/pdf only,
- *    anything else (zip, exe, …) is silently dropped. */
-function extractAttachments(ctx: Context): InboundAttachment[] {
+ *    anything else (zip, exe, …) is silently dropped.
+ *  Bot token is captured in the adapter constructor and threaded through
+ *  so the lazy fetcher can compose the download URL. */
+function extractAttachments(ctx: Context, botToken: string): InboundAttachment[] {
   const msg: any = ctx.message
   if (!msg) return []
   const out: InboundAttachment[] = []
@@ -126,7 +131,7 @@ function extractAttachments(ctx: Context): InboundAttachment[] {
         kind: 'image',
         fileId: largest.file_id,
         mimeType,
-        fetch: makeTelegramFetcher(ctx, largest.file_id, mimeType),
+        fetch: makeTelegramFetcher(ctx, botToken, largest.file_id, mimeType),
         summary: `photo ${largest.width ?? '?'}x${largest.height ?? '?'}`,
       })
     }
@@ -140,7 +145,7 @@ function extractAttachments(ctx: Context): InboundAttachment[] {
         kind: mime.startsWith('image/') ? 'image' : 'document',
         fileId: doc.file_id,
         mimeType: mime,
-        fetch: makeTelegramFetcher(ctx, doc.file_id, mime),
+        fetch: makeTelegramFetcher(ctx, botToken, doc.file_id, mime),
         summary: `${doc.file_name ?? 'document'} (${mime})`,
       })
     }
@@ -149,7 +154,10 @@ function extractAttachments(ctx: Context): InboundAttachment[] {
   return out
 }
 
-export function buildInboundFromTelegramCtx(ctx: Context): InboundEvent {
+export function buildInboundFromTelegramCtx(
+  ctx: Context,
+  botToken: string,
+): InboundEvent {
   const msg: any = ctx.message!
   const from = ctx.from!
   const chat = ctx.chat!
@@ -161,7 +169,7 @@ export function buildInboundFromTelegramCtx(ctx: Context): InboundEvent {
   // Fix5: prefer explicit text, then caption (photo/doc with caption).
   const text: string = msg.text ?? msg.caption ?? ''
 
-  const attachments = extractAttachments(ctx)
+  const attachments = extractAttachments(ctx, botToken)
 
   // Fix5: reply-to text/caption passthrough.
   let replyToText: string | undefined
@@ -196,9 +204,13 @@ export class TelegramAdapter implements ChannelAdapter {
   private handler?: (ev: InboundEvent) => Promise<void>
   /** Wave 2C: optional service used by the fb:up/down callback handler. */
   private feedbackService?: FeedbackService
+  /** Fix5: captured for attachment download URL composition — grammy does
+   *  not publicly expose the token on ctx.api, so we keep our own reference. */
+  private readonly botToken: string
 
   constructor(token: string) {
     this.bot = new Bot(token)
+    this.botToken = token
   }
 
   /** Wave 2C: inject the feedback service (optional). Without it the callback
@@ -211,7 +223,7 @@ export class TelegramAdapter implements ChannelAdapter {
     this.bot.on('message', async (ctx) => {
       if (!ctx.message || !ctx.from || !ctx.chat) return
       if (!this.handler) return
-      const ev = buildInboundFromTelegramCtx(ctx)
+      const ev = buildInboundFromTelegramCtx(ctx, this.botToken)
       try {
         await this.handler(ev)
       } catch (e) {

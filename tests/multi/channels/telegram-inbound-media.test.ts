@@ -37,7 +37,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
   })
 
   it('text-only message has no attachments', () => {
-    const ev = buildInboundFromTelegramCtx(makeCtx({ text: 'hi' }))
+    const ev = buildInboundFromTelegramCtx(makeCtx({ text: 'hi' }), 'TEST_TOKEN')
     expect(ev.text).toBe('hi')
     expect(ev.attachments).toBeUndefined()
     expect(ev.replyToText).toBeUndefined()
@@ -52,6 +52,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
           { file_id: 'B', width: 1024, height: 768 },
         ],
       }),
+      "TEST_TOKEN",
     )
     expect(ev.text).toBe('')
     expect(ev.attachments).toHaveLength(1)
@@ -69,6 +70,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
         caption: 'look at this',
         photo: [{ file_id: 'X', width: 10, height: 10 }],
       }),
+      "TEST_TOKEN",
     )
     expect(ev.text).toBe('look at this')
     expect(ev.attachments).toHaveLength(1)
@@ -82,6 +84,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
         caption: 'caption',
         photo: [{ file_id: 'X', width: 10, height: 10 }],
       }),
+      "TEST_TOKEN",
     )
     expect(ev.text).toBe('explicit text')
     expect(ev.attachments).toHaveLength(1)
@@ -92,6 +95,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
       makeCtx({
         document: { file_id: 'D', mime_type: 'image/png', file_name: 'a.png' },
       }),
+      "TEST_TOKEN",
     )
     expect(ev.attachments).toHaveLength(1)
     expect(ev.attachments![0].kind).toBe('image')
@@ -103,6 +107,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
       makeCtx({
         document: { file_id: 'D', mime_type: 'application/pdf', file_name: 'a.pdf' },
       }),
+      "TEST_TOKEN",
     )
     expect(ev.attachments).toHaveLength(1)
     expect(ev.attachments![0].kind).toBe('document')
@@ -113,6 +118,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
       makeCtx({
         document: { file_id: 'D', mime_type: 'application/zip', file_name: 'a.zip' },
       }),
+      "TEST_TOKEN",
     )
     expect(ev.attachments).toBeUndefined()
   })
@@ -120,6 +126,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
   it('document with null mime_type is filtered out', () => {
     const ev = buildInboundFromTelegramCtx(
       makeCtx({ document: { file_id: 'D', mime_type: null, file_name: 'x' } }),
+      "TEST_TOKEN",
     )
     expect(ev.attachments).toBeUndefined()
   })
@@ -130,6 +137,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
         text: 'ok',
         reply_to_message: { text: 'the original' },
       }),
+      "TEST_TOKEN",
     )
     expect(ev.replyToText).toBe('the original')
   })
@@ -140,6 +148,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
         text: 'ok',
         reply_to_message: { caption: 'photo caption' },
       }),
+      "TEST_TOKEN",
     )
     expect(ev.replyToText).toBe('photo caption')
   })
@@ -151,6 +160,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
         caption: 'album',
         photo: [{ file_id: 'X', width: 10, height: 10 }],
       }),
+      "TEST_TOKEN",
     )
     expect(ev.mediaGroupId).toBe('1234')
   })
@@ -158,6 +168,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
   it('voice message → voice flag set, no attachments', () => {
     const ev = buildInboundFromTelegramCtx(
       makeCtx({ voice: { file_id: 'V', duration: 3 } }),
+      "TEST_TOKEN",
     )
     expect(ev.isVoiceMessage).toBe(true)
     expect(ev.attachments).toBeUndefined()
@@ -167,7 +178,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
     const ctx = makeCtx({
       photo: [{ file_id: 'PHOTOID', width: 10, height: 10 }],
     })
-    const ev = buildInboundFromTelegramCtx(ctx)
+    const ev = buildInboundFromTelegramCtx(ctx, 'TEST_TOKEN')
     const result = await ev.attachments![0].fetch()
     expect(ctx.api.getFile).toHaveBeenCalledWith('PHOTOID')
     expect(result.mimeType).toBe('image/jpeg')
@@ -183,7 +194,7 @@ describe('buildInboundFromTelegramCtx — media (Fix5)', () => {
       arrayBuffer: async () => bigBuf,
     })) as any
     const ctx = makeCtx({ photo: [{ file_id: 'BIG', width: 1, height: 1 }] })
-    const ev = buildInboundFromTelegramCtx(ctx)
+    const ev = buildInboundFromTelegramCtx(ctx, 'TEST_TOKEN')
     await expect(ev.attachments![0].fetch()).rejects.toThrow(/too large/i)
   })
 })

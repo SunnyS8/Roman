@@ -53,7 +53,9 @@ interface BucketState {
  * accumulate, then the result is clamped to [min, max].
  *
  * Signals (each ADDS milliseconds):
- *  - No terminal punctuation in last msg          : +5s (mid-thought)
+ *  - No terminal punctuation AND msg is short     : +5s (mid-thought)
+ *    (long messages without a period are normal in
+ *     messengers — people just don't punctuate)
  *  - Trailing `,:-—`                              : +8s (clearly continuing)
  *  - Last msg length < 10 chars                   : +5s ("ага", "ок")
  *  - Last msg length < 4 chars                    : +3s additional
@@ -61,7 +63,11 @@ interface BucketState {
  *  - First msg in batch, very short, no punct     : +3s extra (likely opener)
  *
  * Trailing `?.!…` adds nothing — sentence is complete, fire immediately.
+ * Single message that looks like a direct command/question (starts with
+ * an imperative verb like "покажи/сделай/расскажи" or "show/tell/...") —
+ * short-circuit to base, the user clearly finished their thought.
  */
+const COMMAND_OPENERS = /^(покажи|скажи|расскажи|сделай|дай|найди|объясни|напиши|создай|открой|запусти|проверь|посчитай|переведи|сгенерируй|добавь|удали|поставь|помоги|составь|подготовь|сформулируй|собери|загрузи|отправь|сохрани|давай|можешь|что|кто|где|когда|почему|зачем|как|сколько|show|tell|explain|make|create|find|write|open|run|check|help|give|what|who|where|when|why|how)\b/i
 function computeDynamicDebounce(
   bucket: BucketState,
   base: number,
@@ -77,10 +83,19 @@ function computeDynamicDebounce(
   const hasTerminal = /[?.!…]/.test(lastChar)
   const hasContinuation = /[,:\-—]/.test(lastChar)
 
+  // Short-circuit: single message that looks like a direct command/question —
+  // answer immediately regardless of punctuation. "покажи предложения по тюнингу",
+  // "how do I deploy", etc. are complete thoughts even without a period.
+  if (n === 1 && COMMAND_OPENERS.test(lastText) && !hasContinuation) {
+    return Math.max(min, Math.min(max, base))
+  }
+
   // Punctuation signals
   if (hasContinuation) {
     ms += 8000
-  } else if (!hasTerminal && lastText.length > 0) {
+  } else if (!hasTerminal && lastText.length > 0 && lastText.length < 20) {
+    // Only penalize missing terminator on SHORT messages — long messages
+    // without a period are the norm in messengers, not a mid-thought signal.
     ms += 5000
   }
   // Short message signals
