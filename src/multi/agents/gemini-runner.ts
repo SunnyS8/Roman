@@ -342,6 +342,17 @@ async function runWithGeminiToolsStreamImpl(
     for (const ip of options.inlineParts ?? []) userParts.push(ip)
     contents.push({ role: 'user', parts: userParts })
   }
+  // DIAG6: confirm inlineParts reach the outbound contents payload on prod.
+  log().info('gemini-runner: stream contents prepared', {
+    turns: contents.length,
+    lastUserPartCount: contents[contents.length - 1]?.parts?.length ?? 0,
+    inlinePartCount: (options.inlineParts ?? []).length,
+    inlineMimes: (options.inlineParts ?? []).map((p) => p.inlineData.mimeType),
+    inlineBytesSum: (options.inlineParts ?? []).reduce(
+      (s, p) => s + (p.inlineData.data?.length ?? 0),
+      0,
+    ),
+  })
   const collectedToolCalls: GeminiRunResult['toolCalls'] = []
   let totalTokens = 0
   let finalText = ''

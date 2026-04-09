@@ -106,9 +106,10 @@ describe('runBetsy — Fix5 attachments', () => {
     expect(inlineParts[1].inlineData.data).toBe('BBB')
     expect(inlineParts[0].inlineData.mimeType).toBe('image/jpeg')
     expect(inlineParts[1].inlineData.mimeType).toBe('image/png')
-    // userMessage suffix
+    // FIX7: marker now uses "прикреплено N изображение" + explicit vision instruction
     expect(args[1]).toContain('check')
-    expect(args[1]).toContain('прислано 2 фото')
+    expect(args[1]).toContain('прикреплено 2 изображение')
+    expect(args[1]).toContain('мультимодальное зрение')
   })
 
   it('empty text + 1 attachment → placeholder userMessage', async () => {
@@ -127,7 +128,9 @@ describe('runBetsy — Fix5 attachments', () => {
       attachments: [attMock('f', 'DATA')],
     })
     const userMessage = agentRunner.mock.calls[0][1]
-    expect(userMessage).toContain('пользователь прислал фото без подписи')
+    // FIX7: marker now explicitly tells the model it has multimodal vision
+    expect(userMessage).toContain('прикреплено 1 изображение')
+    expect(userMessage).toContain('мультимодальное зрение')
   })
 
   it('replyToText is prepended to the userMessage', async () => {
@@ -175,5 +178,62 @@ describe('runBetsy — Fix5 attachments', () => {
     const inlineParts = agentRunner.mock.calls[0][3]
     expect(inlineParts).toHaveLength(1)
     expect(inlineParts[0].inlineData.data).toBe('GOOD')
+  })
+
+  it('FIX7: vision-denial assistant turns are scrubbed from history when attachments present', async () => {
+    const agentRunner = vi.fn().mockResolvedValue({
+      text: 'ok',
+      toolCalls: [],
+      tokensUsed: 1,
+    })
+    // Mock convRepo.recent to return poisoned history
+    const deps = mockDeps(agentRunner)
+    deps.convRepo.recent = vi.fn().mockResolvedValue([
+      { role: 'user', content: '[прислано 1 фото без подписи]', timestamp: new Date() },
+      { role: 'assistant', content: 'Ой, я не могу видеть картинки! 🙈', timestamp: new Date() },
+      { role: 'user', content: 'ну посмотри!', timestamp: new Date() },
+      { role: 'assistant', content: 'я не умею смотреть, только читать и писать', timestamp: new Date() },
+    ])
+    await runBetsy({
+      workspaceId: 'ws1',
+      userMessage: '',
+      channel: 'telegram',
+      currentChatId: 'chat1',
+      deps: deps as any,
+      attachments: [attMock('p', 'PNG')],
+    })
+    const passedHistory = agentRunner.mock.calls[0][2]
+    // Both denial assistant turns must be replaced with the neutral marker
+    const denialTurns = passedHistory.filter((t: any) =>
+      /не могу видеть|не умею смотреть/i.test(t.content),
+    )
+    expect(denialTurns).toHaveLength(0)
+    const scrubbedTurns = passedHistory.filter((t: any) =>
+      /прошлый ответ удалён.*ошибочное/i.test(t.content),
+    )
+    expect(scrubbedTurns.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('FIX7: history is NOT scrubbed when no attachments (preserve normal flow)', async () => {
+    const agentRunner = vi.fn().mockResolvedValue({
+      text: 'ok',
+      toolCalls: [],
+      tokensUsed: 1,
+    })
+    const deps = mockDeps(agentRunner)
+    deps.convRepo.recent = vi.fn().mockResolvedValue([
+      { role: 'assistant', content: 'я не могу видеть картинки', timestamp: new Date() },
+    ])
+    await runBetsy({
+      workspaceId: 'ws1',
+      userMessage: 'привет',
+      channel: 'telegram',
+      currentChatId: 'chat1',
+      deps: deps as any,
+      // no attachments
+    })
+    const passedHistory = agentRunner.mock.calls[0][2]
+    // Without attachments, scrubbing is skipped — original content remains
+    expect(passedHistory.some((t: any) => /не могу видеть/i.test(t.content))).toBe(true)
   })
 })

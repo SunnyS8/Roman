@@ -281,16 +281,43 @@ function composeUserMessage(input: {
   attachmentCount: number
 }): string {
   let text = input.userMessage ?? ''
+  // FIX7: explicit instruction to model that it CAN see the inlineData
+  // attached to this turn. Without this, Gemini Flash in stream mode tends
+  // to copy "не могу видеть" patterns from earlier history (in-context
+  // behaviour cloning) instead of actually using the inlineData.
   if (input.attachmentCount > 0 && (!text || text.trim().length === 0)) {
-    text = '(пользователь прислал фото без подписи)'
+    text = `[К этому сообщению прикреплено ${input.attachmentCount} изображение(й). У тебя есть мультимодальное зрение — посмотри на них и опиши что видишь.]`
   } else if (input.attachmentCount > 0) {
-    text = `${text}\n\n(прислано ${input.attachmentCount} фото)`
+    text = `${text}\n\n[К этому сообщению прикреплено ${input.attachmentCount} изображение(й). У тебя есть мультимодальное зрение — учти их при ответе.]`
   }
   if (input.replyToText && input.replyToText.trim().length > 0) {
     const quoted = input.replyToText.slice(0, 500)
     text = `[В ответ на: ${quoted}]\n\n${text}`
   }
   return text
+}
+
+/**
+ * FIX7: filter out "I can't see images" hallucinations from past assistant
+ * history. They poison the context — Gemini copies the pattern in the next
+ * vision request even when inlineData is actually attached. We rewrite such
+ * turns to a neutral marker so the model doesn't learn the wrong behaviour.
+ */
+const VISION_DENIAL_REGEX =
+  /не могу (?:по)?смотреть|не могу видеть|не вижу картинк|не умею (?:смотреть|видеть|распозна)|не могу распозна|пока не умею.*картин|не могу .* фото/i
+
+function sanitizeHistoryForVision(
+  history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }>,
+): Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> {
+  return history.map((turn) => {
+    if (turn.role === 'assistant' && VISION_DENIAL_REGEX.test(turn.content)) {
+      return {
+        ...turn,
+        content: '[прошлый ответ удалён — содержал ошибочное утверждение что не вижу изображения]',
+      }
+    }
+    return turn
+  })
 }
 
 export interface BetsyResponse {
@@ -421,9 +448,14 @@ async function runBetsyImpl(input: RunBetsyInput): Promise<BetsyResponse> {
     }
   }
 
+  // FIX7: scrub vision-denial hallucinations from history when this turn
+  // has attachments (so the model doesn't behaviour-clone "не могу видеть").
+  const sanitizedHistory =
+    inlineParts.length > 0 ? sanitizeHistoryForVision(context.history) : context.history
+
   let result: { text: string; toolCalls: unknown[]; tokensUsed: number }
   try {
-    result = await deps.agentRunner(agent, userMessage, context.history, inlineParts)
+    result = await deps.agentRunner(agent, userMessage, sanitizedHistory, inlineParts)
     log().info('runBetsy: agent done', {
       workspaceId,
       textLen: result.text?.length ?? 0,
@@ -675,11 +707,15 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
     }
   }
 
+  // FIX7: same vision-denial scrubbing as the non-stream path.
+  const sanitizedHistoryStream =
+    inlineParts.length > 0 ? sanitizeHistoryForVision(context.history) : context.history
+
   const { textStream: rawStream, finalize } = await runWithGeminiToolsStream(
     deps.gemini,
     agent,
     userMessage,
-    context.history,
+    sanitizedHistoryStream,
     { forceTool: input.forceTool, inlineParts },
   )
 
