@@ -1,11 +1,17 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { WebSocketServer } from 'ws'
 
 export interface MockBackend {
   url: string
   close: () => Promise<void>
   /** Simulate user clicking /start in Telegram. */
   simulateTelegramStart: () => void
+}
+
+export interface MockBackendOptions {
+  /** Enable the /ws/chat WebSocket endpoint with a canned streaming reply. */
+  enableChatWs?: boolean
 }
 
 const FAKE_PNG = Buffer.from([
@@ -21,7 +27,7 @@ interface MockState {
   completedJwt: string | null
 }
 
-export async function startMockBackend(): Promise<MockBackend> {
+export async function startMockBackend(opts: MockBackendOptions = {}): Promise<MockBackend> {
   const state: MockState = { pendingNonce: null, completedJwt: null }
 
   let server: Server
@@ -99,9 +105,67 @@ export async function startMockBackend(): Promise<MockBackend> {
       tick()
       return
     }
+    if (req.method === 'GET' && url.pathname === '/chat/history') {
+      // Mock history is always empty for the happy path; the WS pushes
+      // the initial history-batch frame on connect.
+      const auth = req.headers.authorization ?? ''
+      if (!auth.startsWith('Bearer ')) {
+        res.statusCode = 401
+        res.end('{}')
+        return
+      }
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ messages: [], hasMore: false }))
+      return
+    }
     res.statusCode = 404
     res.end()
   })
+
+  // WS chat — only attached if requested. The handler accepts every JWT
+  // (it just checks for presence of an Authorization header) and replies
+  // with a canned streamed message for any user-message frame.
+  let wss: WebSocketServer | null = null
+  if (opts.enableChatWs) {
+    wss = new WebSocketServer({ noServer: true })
+    server.on('upgrade', (req, socket, head) => {
+      const url = new URL(req.url ?? '/', 'http://x')
+      if (url.pathname !== '/ws/chat') {
+        socket.destroy()
+        return
+      }
+      wss!.handleUpgrade(req, socket, head, (ws) => {
+        // Push an empty history-batch immediately so the renderer's
+        // useChat treats the connection as ready.
+        ws.send(JSON.stringify({ type: 'history-batch', messages: [], hasMore: false }))
+        ws.on('message', (raw) => {
+          let msg: { type?: string; text?: string; clientMessageId?: string }
+          try {
+            msg = JSON.parse(raw.toString())
+          } catch {
+            return
+          }
+          if (msg.type === 'ping') {
+            ws.send(JSON.stringify({ type: 'pong' }))
+            return
+          }
+          if (msg.type === 'user-message') {
+            const messageId = 'm-' + Date.now()
+            const chunks = ['ок', 'окей', 'окей, понял.']
+            void (async () => {
+              for (const c of chunks) {
+                await new Promise((r) => setTimeout(r, 30))
+                ws.send(JSON.stringify({ type: 'message-delta', messageId, text: c }))
+              }
+              ws.send(
+                JSON.stringify({ type: 'message-final', messageId, text: 'окей, понял.' }),
+              )
+            })()
+          }
+        })
+      })
+    })
+  }
 
   await new Promise<void>((r) => {
     server.listen(0, () => r())
@@ -112,6 +176,7 @@ export async function startMockBackend(): Promise<MockBackend> {
     url: `http://localhost:${port}`,
     close: () =>
       new Promise((r) => {
+        wss?.close()
         server.close(() => r())
       }),
     simulateTelegramStart: () => {
