@@ -203,7 +203,7 @@ async function loadMcpToolsSafe(
 export interface RunBetsyInput {
   workspaceId: string
   userMessage: string
-  channel: 'telegram' | 'max'
+  channel: 'telegram' | 'max' | 'desktop'
   deps: RunBetsyDeps
   /** When true, do NOT persist the user message (caller already did it).
    *  Used by retry loops to avoid duplicating the user turn in conversation. */

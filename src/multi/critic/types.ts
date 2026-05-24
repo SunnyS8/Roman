@@ -16,7 +16,7 @@ export interface CriticInput {
   /** Top relevant facts about the owner (5-10). Optional. */
   ownerFacts?: string[]
   /** Outbound channel — used for length heuristics. */
-  channel: 'telegram' | 'max'
+  channel: 'telegram' | 'max' | 'desktop'
 }
 
 export type CriticIssueKind =

@@ -1,4 +1,4 @@
-export type ChannelName = 'telegram' | 'max'
+export type ChannelName = 'telegram' | 'max' | 'desktop'
 
 /**
  * An attachment on an inbound message (photo, document). The bytes are NOT

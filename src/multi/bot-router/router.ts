@@ -349,8 +349,14 @@ export class BotRouter {
       await this.deps.wsRepo.updateLastActiveChannel(workspace.id, ev.channel)
 
       // Try link code match
+      // Desktop channel has no link-codes UX (it auths via JWT), so the
+      // 6-digit verification path is restricted to telegram/max inbound.
       const linkMatch = ev.text.match(LINK_CODE_RE)
-      if (linkMatch && workspace.status !== 'onboarding') {
+      if (
+        linkMatch &&
+        workspace.status !== 'onboarding' &&
+        (ev.channel === 'telegram' || ev.channel === 'max')
+      ) {
         const result = await this.deps.linkingSvc.verifyAndLink(linkMatch[1], {
           fromChannel: ev.channel,
           newChannelUserId: Number(ev.userId),

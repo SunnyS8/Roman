@@ -7,7 +7,7 @@ export type WorkspaceStatus =
   | 'past_due'
   | 'deleted'
 
-export type ChannelName = 'telegram' | 'max' | 'cabinet'
+export type ChannelName = 'telegram' | 'max' | 'cabinet' | 'desktop'
 
 export type NotifyPref = 'auto' | 'telegram' | 'max'
 

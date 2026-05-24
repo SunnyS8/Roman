@@ -5,7 +5,7 @@ import type { MemoryTool } from './memory-tools.js'
 export interface ReminderToolsDeps {
   remindersRepo: RemindersRepo
   workspaceId: string
-  currentChannel: 'telegram' | 'max'
+  currentChannel: 'telegram' | 'max' | 'desktop'
 }
 
 /**

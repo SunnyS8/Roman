@@ -1,10 +1,19 @@
 import http from 'node:http'
+import type { Socket } from 'node:net'
 import type { Pool } from 'pg'
 
 export type ExtraRoute = {
   method: string
   path: string
   handler: (req: http.IncomingMessage, res: http.ServerResponse) => Promise<void> | void
+}
+
+export interface HealthzServerOptions {
+  extraRoutes?: ExtraRoute[]
+  /** Optional handler for WS upgrade requests (e.g. /ws/chat). When set, the
+   *  server registers it as the sole 'upgrade' listener — internal dispatch by
+   *  pathname is the handler's responsibility. */
+  upgrade?: (req: http.IncomingMessage, socket: Socket, head: Buffer) => void
 }
 
 export interface HealthzDeps {
@@ -29,8 +38,15 @@ export async function handleHealthz(deps: HealthzDeps): Promise<HealthzResponse>
 export function startHealthzServer(
   port: number,
   pool: Pool,
-  extraRoutes: ExtraRoute[] = [],
+  optsOrExtraRoutes: HealthzServerOptions | ExtraRoute[] = [],
 ): http.Server {
+  // Backwards-compat: pre-P1.5 call sites passed `extraRoutes` directly as
+  // the third positional argument.
+  const opts: HealthzServerOptions = Array.isArray(optsOrExtraRoutes)
+    ? { extraRoutes: optsOrExtraRoutes }
+    : optsOrExtraRoutes
+  const extraRoutes = opts.extraRoutes ?? []
+
   const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && req.url === '/healthz') {
       const result = await handleHealthz({
@@ -62,6 +78,9 @@ export function startHealthzServer(
     res.writeHead(404)
     res.end()
   })
+  if (opts.upgrade) {
+    server.on('upgrade', opts.upgrade)
+  }
   server.listen(port)
   return server
 }

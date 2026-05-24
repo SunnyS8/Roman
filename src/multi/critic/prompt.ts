@@ -28,7 +28,7 @@ export function buildCriticUserPrompt(input: {
   userMessage: string
   personaPrompt: string
   ownerFacts?: string[]
-  channel: 'telegram' | 'max'
+  channel: 'telegram' | 'max' | 'desktop'
 }): string {
   const facts =
     input.ownerFacts && input.ownerFacts.length > 0

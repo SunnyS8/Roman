@@ -33,7 +33,7 @@ export interface CreateBetsyAgentInput {
   persona: Persona
   ownerFacts: string[]
   tools: BetsyTools
-  currentChannel: 'telegram' | 'max'
+  currentChannel: 'telegram' | 'max' | 'desktop'
   personalitySliders?: Record<string, number>
 }
 

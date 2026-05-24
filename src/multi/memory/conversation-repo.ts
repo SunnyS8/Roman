@@ -26,7 +26,7 @@ function rowToConversation(r: any): Conversation {
 }
 
 export interface AppendInput {
-  channel: 'telegram' | 'max' | 'cabinet'
+  channel: 'telegram' | 'max' | 'cabinet' | 'desktop'
   role: 'user' | 'assistant' | 'tool'
   content: string
   toolCalls?: unknown

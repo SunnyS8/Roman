@@ -13,7 +13,7 @@ export interface MemoryFact {
 export interface Conversation {
   id: string
   workspaceId: string
-  channel: 'telegram' | 'max' | 'cabinet'
+  channel: 'telegram' | 'max' | 'cabinet' | 'desktop'
   role: 'user' | 'assistant' | 'tool'
   content: string
   toolCalls: unknown

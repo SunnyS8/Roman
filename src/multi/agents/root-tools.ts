@@ -71,7 +71,7 @@ export interface BuildRootToolsDeps {
 
 export interface BuildRootToolsOptions {
   workspaceId: string
-  channel: 'telegram' | 'max'
+  channel: 'telegram' | 'max' | 'desktop'
   currentChatId: string
   runContext: RunContext
   /** Already-loaded MCP tools (or null). The caller owns lifecycle. */

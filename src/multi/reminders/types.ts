@@ -5,7 +5,7 @@ export interface Reminder {
   workspaceId: string
   fireAt: Date
   text: string
-  preferredChannel: 'telegram' | 'max'
+  preferredChannel: 'telegram' | 'max' | 'desktop'
   status: ReminderStatus
   createdAt: Date
   decidedAt: Date | null
@@ -14,5 +14,5 @@ export interface Reminder {
 export interface CreateReminderInput {
   fireAt: Date
   text: string
-  preferredChannel: 'telegram' | 'max'
+  preferredChannel: 'telegram' | 'max' | 'desktop'
 }

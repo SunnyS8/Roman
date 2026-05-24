@@ -15,7 +15,7 @@ export interface RecallToolsDeps {
   gemini: GoogleGenAI
   workspaceId: string
   currentChatId: string
-  currentChannel: 'telegram' | 'max'
+  currentChannel: 'telegram' | 'max' | 'desktop'
   runContext: RunContext
 }
 
