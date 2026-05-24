@@ -7,6 +7,8 @@ import type {
   ChannelName,
   NotifyPref,
 } from './types.js'
+import { getPreset } from '../personas/presets.js'
+import type { PersonaRepo } from '../personas/repo.js'
 
 function rowToWorkspace(r: any): Workspace {
   return {
@@ -173,5 +175,62 @@ export class WorkspaceRepo {
         [id, maxId],
       )
     })
+  }
+
+  /**
+   * P1.A — Telegram deep-link login: wraps `upsertForTelegram` + creating a
+   * persona from a built-in preset + linking persona_id in a single flow.
+   *
+   * Idempotent: if a workspace already exists for the given tgId and already
+   * has a persona, returns it unchanged — preset switches on re-login are
+   * intentionally NOT supported here (user can change persona later via the
+   * control panel).
+   *
+   * Throws if `presetId` is not in the built-in catalog.
+   */
+  async createFromTelegramLogin(
+    tgId: number,
+    presetId: string,
+    personas: PersonaRepo,
+  ): Promise<Workspace> {
+    const preset = getPreset(presetId)
+    if (!preset) throw new Error(`unknown preset: ${presetId}`)
+
+    // If the user has logged in before and already picked a persona, leave
+    // their existing setup alone — don't silently swap presets.
+    const existing = await this.findByTelegram(tgId)
+    if (existing && existing.personaId) return existing
+
+    const ws = await this.upsertForTelegram(tgId)
+
+    // upsertForTelegram returns persona_id='betsy' by default (column default).
+    // We need to check the *persona table* — if there's no real persona row
+    // yet, create one from the preset and link it.
+    const existingPersona = await personas.findByWorkspace(ws.id)
+    if (!existingPersona) {
+      const persona = await personas.create(ws.id, {
+        presetId: preset.id,
+        name: preset.name,
+        gender: preset.gender,
+        voiceId: preset.voiceId,
+        personalityPrompt: preset.defaultPersonalityPrompt,
+        biography: preset.biography,
+        behaviorConfig: preset.defaultBehavior,
+      })
+      await this.updatePersonaId(ws.id, persona.id)
+      const refreshed = await this.findById(ws.id)
+      // findById must succeed: we just created the workspace.
+      if (!refreshed) throw new Error('createFromTelegramLogin: workspace vanished after create')
+      return refreshed
+    }
+    // Workspace existed without persona_id linked but persona row was already
+    // there — link it now and return refreshed workspace.
+    if (ws.personaId !== existingPersona.id) {
+      await this.updatePersonaId(ws.id, existingPersona.id)
+      const refreshed = await this.findById(ws.id)
+      if (!refreshed) throw new Error('createFromTelegramLogin: workspace vanished after relink')
+      return refreshed
+    }
+    return ws
   }
 }

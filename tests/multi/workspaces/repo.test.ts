@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { Pool } from 'pg'
 import { runMigrations } from '../../../src/multi/db/migrate.js'
 import { WorkspaceRepo } from '../../../src/multi/workspaces/repo.js'
+import { PersonaRepo } from '../../../src/multi/personas/repo.js'
+import { getPreset } from '../../../src/multi/personas/presets.js'
 
 const url = process.env.BC_TEST_DATABASE_URL
 const d = url ? describe : describe.skip
@@ -75,5 +77,51 @@ d('WorkspaceRepo', () => {
   it('findByTelegram returns null for unknown', async () => {
     const found = await repo.findByTelegram(9999)
     expect(found).toBeNull()
+  })
+})
+
+d('WorkspaceRepo.createFromTelegramLogin', () => {
+  let pool: Pool
+  let workspaces: WorkspaceRepo
+  let personas: PersonaRepo
+
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: url })
+    await pool.query('drop schema public cascade; create schema public;')
+    await runMigrations(pool)
+    workspaces = new WorkspaceRepo(pool)
+    personas = new PersonaRepo(pool)
+  })
+  afterAll(async () => {
+    await pool.end()
+  })
+  beforeEach(async () => {
+    await pool.query('truncate workspaces cascade')
+  })
+
+  it('creates workspace + persona from preset, links persona_id', async () => {
+    const ws = await workspaces.createFromTelegramLogin(555001, 'betsy-default', personas)
+    expect(ws.ownerTgId).toBe(555001)
+    expect(ws.personaId).not.toBeNull()
+    const persona = await personas.findById(ws.id, ws.personaId!)
+    expect(persona).not.toBeNull()
+    const preset = getPreset('betsy-default')!
+    expect(persona!.name).toBe(preset.name)
+    expect(persona!.voiceId).toBe(preset.voiceId)
+    expect(persona!.personalityPrompt).toBe(preset.defaultPersonalityPrompt)
+  })
+
+  it('idempotent — second call returns existing workspace, does not create extra persona', async () => {
+    const ws1 = await workspaces.createFromTelegramLogin(555002, 'betsy-default', personas)
+    const ws2 = await workspaces.createFromTelegramLogin(555002, 'betsy-pro', personas)
+    expect(ws1.id).toBe(ws2.id)
+    // persona id stays the same — re-login doesn't switch presets
+    expect(ws2.personaId).toBe(ws1.personaId)
+  })
+
+  it('throws on unknown preset', async () => {
+    await expect(
+      workspaces.createFromTelegramLogin(555003, 'unknown-preset', personas),
+    ).rejects.toThrow(/unknown preset/i)
   })
 })
