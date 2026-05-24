@@ -1,5 +1,6 @@
 import type { WizardState, WizardEvent } from '../main/wizard-engine'
 import type { CachedPreset } from '../main/persona-cache'
+import type { Message } from './chat-protocol'
 
 export interface SshCredsDto {
   host: string
@@ -40,5 +41,17 @@ export interface IpcContract {
     geminiApiKey: string
   }) => Promise<{ ok: boolean; error?: string }>
   'chat:send': (text: string) => Promise<void>
+  'chat:history': (opts: {
+    before?: string
+    limit?: number
+  }) => Promise<{ messages: Message[]; hasMore: boolean }>
+  /**
+   * Open the WS connection to the multi-server. Renderer calls this once
+   * the wizard reaches `done` (and an `hostedJwt` is available).
+   */
+  'chat:start': () => Promise<void>
   'app:getInfo': () => Promise<AppInfo>
+  // Push events (main -> renderer), delivered via window.api.on(channel, cb):
+  //   'chat:event'      payload: ServerMessage from src/shared/chat-protocol
+  //   'chat:connection' payload: { status: 'connecting' | 'open' | 'reconnecting' | 'auth-failed' }
 }

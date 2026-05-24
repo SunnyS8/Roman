@@ -1,4 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron'
+import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { log } from './logger'
 import { reduce, initialState, type WizardState, type WizardEvent } from './wizard-engine'
@@ -7,6 +8,9 @@ import { registerIpcHandlers, type SshCredsDto, type DeployParamsDto } from './i
 import { HostedAuth } from './hosted-auth'
 import { SshBootstrap } from './ssh-bootstrap'
 import { SecureStorage } from './secure-storage'
+import { BackendConnector } from './backend-connector'
+import { ChatHistoryClient } from './chat-history-client'
+import type { ClientMessage, ServerMessage } from '../shared/chat-protocol'
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const apiBase = process.env.BC_API_BASE ?? 'https://api.betsyai.io'
@@ -25,6 +29,65 @@ const hostedAuth = new HostedAuth(apiBase)
 let activePollNonce: string | null = null
 let activeBootstrap: SshBootstrap | null = null
 let lastDeployedPublicUrl: string | null = null
+let chatConnector: BackendConnector | null = null
+let chatHistoryClient: ChatHistoryClient | null = null
+
+function chatEngineBase(): string {
+  if (wizardState.mode === 'hosted') return apiBase
+  if (wizardState.mode === 'selfhost' && lastDeployedPublicUrl) return lastDeployedPublicUrl
+  return apiBase
+}
+
+function startChatBackend(): void {
+  if (!wizardState.hostedJwt) {
+    log('warn', 'chat-start-without-jwt')
+    return
+  }
+  const base = chatEngineBase()
+  // Stop any previous connector before replacing (idempotent).
+  if (chatConnector) {
+    try {
+      chatConnector.stop()
+    } catch {
+      // ignore
+    }
+    chatConnector = null
+  }
+  const wsUrl = base.replace(/^http/i, 'ws') + '/ws/chat'
+  const connector = new BackendConnector({ url: wsUrl, jwt: wizardState.hostedJwt })
+  chatHistoryClient = new ChatHistoryClient(base, wizardState.hostedJwt)
+
+  connector.on('open', () => {
+    mainWindow?.webContents.send('chat:connection', { status: 'open' })
+  })
+  connector.on('close', () => {
+    mainWindow?.webContents.send('chat:connection', { status: 'reconnecting' })
+  })
+  connector.on('auth-failed', () => {
+    mainWindow?.webContents.send('chat:connection', { status: 'auth-failed' })
+  })
+  connector.on('message', (msg: ServerMessage) => {
+    mainWindow?.webContents.send('chat:event', msg)
+  })
+
+  // Tell renderer we're connecting before the WS opens (so banner shows
+  // a "connecting" state instead of "auth-failed" leftover from a previous run).
+  mainWindow?.webContents.send('chat:connection', { status: 'connecting' })
+  connector.start()
+  chatConnector = connector
+}
+
+function stopChatBackend(): void {
+  if (chatConnector) {
+    try {
+      chatConnector.stop()
+    } catch {
+      // ignore
+    }
+    chatConnector = null
+  }
+  chatHistoryClient = null
+}
 
 function resourcesDir(): string {
   return app.isPackaged ? process.resourcesPath : join(__dirname, '..', '..', 'resources')
@@ -132,6 +195,10 @@ void app.whenReady().then(async () => {
     'wizard:dispatch': async (event: WizardEvent) => {
       wizardState = reduce(wizardState, event)
       pushWizardState()
+      // Reset chat backend when wizard is reset (re-auth flow).
+      if (event.type === 'reset') {
+        stopChatBackend()
+      }
       return wizardState
     },
     'hosted:startLogin': async (presetId: string) => {
@@ -241,6 +308,22 @@ void app.whenReady().then(async () => {
             ? lastDeployedPublicUrl
             : null,
     }),
+    'chat:start': async () => {
+      startChatBackend()
+    },
+    'chat:send': async (text: string) => {
+      if (!chatConnector) throw new Error('chat-not-started')
+      const msg: ClientMessage = {
+        type: 'user-message',
+        text,
+        clientMessageId: randomUUID(),
+      }
+      chatConnector.send(msg)
+    },
+    'chat:history': async (opts: { before?: string; limit?: number }) => {
+      if (!chatHistoryClient) throw new Error('chat-not-started')
+      return chatHistoryClient.fetchHistory(opts)
+    },
   })
 
   createWindow()
