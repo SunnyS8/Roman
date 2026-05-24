@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Restore the Electron-ABI native binary (after running vitest).
- * Run before `npm start` / `npm run dist`.
+ * Looks for .electron-abi backup; falls back to prebuild-install.
  */
 const { copyFileSync, existsSync } = require('node:fs')
 const { resolve } = require('node:path')
@@ -13,8 +13,18 @@ const electronAbiBackup = target + '.electron-abi'
 
 if (existsSync(electronAbiBackup)) {
   copyFileSync(electronAbiBackup, target)
-  console.log('restored electron-abi binary')
+  console.log('use-electron-abi: restored .electron-abi binary')
 } else {
-  console.log('no electron-abi backup found — running electron-builder install-app-deps')
-  execSync('npx electron-builder install-app-deps', { stdio: 'inherit', cwd: resolve(here, '..') })
+  console.log('use-electron-abi: no backup — running prebuild-install for electron')
+  const cwd = resolve(here, '..', 'node_modules', 'better-sqlite3')
+  // Match the Electron version we're shipping (see package.json devDependencies.electron).
+  // Electron 33 = ABI 130.
+  execSync('npx prebuild-install --runtime=electron --target=33.4.11 --abi=130', {
+    stdio: 'inherit',
+    cwd,
+  })
+  if (existsSync(target)) {
+    copyFileSync(target, electronAbiBackup)
+    console.log('use-electron-abi: cached fresh binary as .electron-abi')
+  }
 }

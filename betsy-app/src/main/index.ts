@@ -11,6 +11,12 @@ import { SecureStorage } from './secure-storage'
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const apiBase = process.env.BC_API_BASE ?? 'https://api.betsyai.io'
 
+// Allow tests to override user-data location.
+const userDataOverride = process.argv.find((a) => a.startsWith('--user-data-dir='))
+if (userDataOverride) {
+  app.setPath('userData', userDataOverride.slice('--user-data-dir='.length))
+}
+
 let mainWindow: BrowserWindow | null = null
 let wizardState: WizardState = initialState()
 let personaCache: PersonaCache | null = null
@@ -134,7 +140,12 @@ void app.whenReady().then(async () => {
       return { nonce: r.nonce, deepLink: r.deepLink }
     },
     'hosted:openExternal': async (url: string) => {
-      await shell.openExternal(url)
+      try {
+        await shell.openExternal(url)
+      } catch (e) {
+        log('warn', 'open-external-failed', { url, err: String(e) })
+        // non-fatal — user can copy the link from the waiting screen
+      }
     },
     'ssh:connect': async (creds: SshCredsDto) => {
       activeBootstrap?.disconnect()

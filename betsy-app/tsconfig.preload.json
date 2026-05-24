@@ -4,8 +4,8 @@
     "module": "CommonJS",
     "moduleResolution": "node",
     "target": "ES2022",
-    "outDir": "dist/preload",
-    "rootDir": "src/preload",
+    "outDir": "dist",
+    "rootDir": "src",
     "types": ["node"]
   },
   "include": ["src/preload/**/*"]
