@@ -440,6 +440,27 @@ export class BotRouter {
         }
       }
 
+      // P1.5 — live mirror: echo user messages from non-desktop channels into
+      // any active desktop client so the chat window stays in sync with TG.
+      if (
+        this.deps.runBetsyDeps.outboundDispatcher &&
+        ev.channel !== 'desktop'
+      ) {
+        await this.deps.runBetsyDeps.outboundDispatcher
+          .afterPrimarySend({
+            workspaceId: workspace.id,
+            primaryChannel: ev.channel,
+            role: 'user',
+            text: persistedContent,
+          })
+          .catch((e) =>
+            log().warn('outboundDispatcher: user mirror failed', {
+              workspaceId: workspace.id,
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          )
+      }
+
       // Semantic intent classification — one tiny Gemini Flash call decides:
       //  - force a specific tool (e.g. generate_selfie) with extracted args
       //  - ask a clarifying question and skip the main turn
@@ -552,6 +573,28 @@ export class BotRouter {
                 toolCalls: Array.isArray(result.toolCalls) ? result.toolCalls.length : 0,
                 replyTo: result.replyTo,
               })
+              // P1.5 — mirror assistant reply into desktop clients when the
+              // primary channel is not desktop. Fail-open: dispatcher errors
+              // never block the turn.
+              if (
+                this.deps.runBetsyDeps.outboundDispatcher &&
+                ev.channel !== 'desktop' &&
+                result.text
+              ) {
+                await this.deps.runBetsyDeps.outboundDispatcher
+                  .afterPrimarySend({
+                    workspaceId: workspace.id,
+                    primaryChannel: ev.channel,
+                    role: 'assistant',
+                    text: result.text,
+                  })
+                  .catch((e) =>
+                    log().warn('outboundDispatcher: stream mirror failed', {
+                      workspaceId: workspace.id,
+                      error: e instanceof Error ? e.message : String(e),
+                    }),
+                  )
+              }
             } else {
               log().info('routing: runBetsy attempt', { workspaceId: workspace.id, attempt })
               const response = await withTimeout(
@@ -595,6 +638,27 @@ export class BotRouter {
                   )
                   .catch((e) =>
                     log().warn('bot-router: setExternalMessageId failed', {
+                      workspaceId: workspace.id,
+                      error: e instanceof Error ? e.message : String(e),
+                    }),
+                  )
+              }
+              // P1.5 — mirror assistant reply into desktop clients when the
+              // primary channel is not desktop. Fail-open.
+              if (
+                this.deps.runBetsyDeps.outboundDispatcher &&
+                ev.channel !== 'desktop' &&
+                response.text
+              ) {
+                await this.deps.runBetsyDeps.outboundDispatcher
+                  .afterPrimarySend({
+                    workspaceId: workspace.id,
+                    primaryChannel: ev.channel,
+                    role: 'assistant',
+                    text: response.text,
+                  })
+                  .catch((e) =>
+                    log().warn('outboundDispatcher: send mirror failed', {
                       workspaceId: workspace.id,
                       error: e instanceof Error ? e.message : String(e),
                     }),
