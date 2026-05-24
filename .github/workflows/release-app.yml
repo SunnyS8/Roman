@@ -80,53 +80,37 @@ jobs:
         shell: bash
         run: ls -la release/
 
-      - name: Configure AWS CLI for R2
+      - name: Setup SSH for VPS upload
         env:
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         shell: bash
         run: |
-          mkdir -p ~/.aws
-          cat > ~/.aws/credentials <<EOF
-          [default]
-          aws_access_key_id=${R2_ACCESS_KEY_ID}
-          aws_secret_access_key=${R2_SECRET_ACCESS_KEY}
-          EOF
-          cat > ~/.aws/config <<EOF
-          [default]
-          region=auto
-          EOF
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H 193.42.124.214 >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Upload artifacts to R2
+      - name: Upload artifacts to VPS (updates.betsyai.io)
         working-directory: betsy-app
         env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           VERSION: ${{ steps.ver.outputs.version }}
         shell: bash
+        # /var/www/updates/electron/win-x64/ is served by nginx at
+        # https://updates.betsyai.io/electron/win-x64/. nginx caches *.yml/
+        # *.json for 60s and *.exe/*.blockmap for 30 days — match those by
+        # name so the static cache headers do the right thing.
         run: |
-          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BUCKET="s3://betsy-updates/electron/win-x64"
-          # Upload every installer-related artifact electron-builder produced.
+          REMOTE="root@193.42.124.214:/var/www/updates/electron/win-x64/"
           shopt -s nullglob
           for f in release/*.exe release/*.exe.blockmap release/latest.yml; do
             [ -f "$f" ] || continue
-            BN="$(basename "$f")"
-            CT="application/octet-stream"
-            case "$BN" in
-              *.yml)        CT="text/yaml" ;;
-              *.exe)        CT="application/vnd.microsoft.portable-executable" ;;
-              *.blockmap)   CT="application/octet-stream" ;;
-            esac
-            echo "uploading $f -> $BUCKET/$BN ($CT)"
-            aws s3 cp "$f" "$BUCKET/$BN" \
-              --endpoint-url "$ENDPOINT" \
-              --content-type "$CT" \
-              --cache-control "public, max-age=60"
+            echo "scp $f -> $REMOTE"
+            scp -i ~/.ssh/id_ed25519 "$f" "$REMOTE"
           done
 
-          # Maintain a stable "latest" installer URL for the download page.
-          # electron-builder names the installer "Betsy Setup ${version}.exe".
-          # Prefer that, but fall back to any *.exe if the name changes.
+          # Maintain stable "latest" installer pointer for the download page.
+          # electron-builder names it "Betsy Setup ${version}.exe" (with space).
           SRC=""
           if [ -f "release/Betsy Setup ${VERSION}.exe" ]; then
             SRC="release/Betsy Setup ${VERSION}.exe"
@@ -135,10 +119,7 @@ jobs:
           fi
           if [ -n "$SRC" ] && [ -f "$SRC" ]; then
             echo "publishing latest pointer from $SRC"
-            aws s3 cp "$SRC" "$BUCKET/Betsy-Setup-latest.exe" \
-              --endpoint-url "$ENDPOINT" \
-              --content-type "application/vnd.microsoft.portable-executable" \
-              --cache-control "public, max-age=60"
+            scp -i ~/.ssh/id_ed25519 "$SRC" "${REMOTE}Betsy-Setup-latest.exe"
           fi
 
       - name: Upload release artifacts (GitHub)

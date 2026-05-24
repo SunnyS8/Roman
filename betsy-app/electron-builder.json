@@ -27,7 +27,8 @@
     {
       "provider": "generic",
       "url": "https://updates.betsyai.io/electron/win-x64",
-      "channel": "latest"
+      "channel": "latest",
+      "useMultipleRangeRequest": true
     }
   ]
 }
