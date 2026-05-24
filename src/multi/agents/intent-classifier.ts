@@ -116,8 +116,13 @@ export async function classifyIntent(
       config: {
         systemInstruction: SYSTEM,
         responseMimeType: 'application/json',
-        // Tight token budget — output is at most ~80 tokens
-        maxOutputTokens: 200,
+        // 1024 because Gemini 2.5 thinking tokens count against the output
+        // budget. Observed in prod (2026-05-25): 200-token cap chopped the
+        // JSON mid-args, regex fallback couldn't recover, classifier
+        // downgraded force_tool to normal and the selfie tool was never
+        // invoked. The JSON itself is still ~80 tokens; the rest is slack
+        // for thinking. Classifier runs once per inbound, cost is negligible.
+        maxOutputTokens: 1024,
         temperature: 0.0,
       } as any,
     })
@@ -134,12 +139,38 @@ export async function classifyIntent(
     } catch {
       // Try to extract JSON from possibly-wrapped text
       const m = String(text).match(/\{[\s\S]*\}/)
-      if (!m) return { action: 'normal' }
-      try {
-        parsed = JSON.parse(m[0])
-      } catch {
-        return { action: 'normal' }
+      if (m) {
+        try {
+          parsed = JSON.parse(m[0])
+        } catch {
+          // fallthrough to truncated-JSON recovery below
+        }
       }
+      // Truncated JSON recovery: classifier sometimes hits the output-token
+      // cap mid-object, leaving us with `{"action":"force_tool", "tool":"x", "args":{`.
+      // Extract `action`/`tool` via regex so we still get the force_tool
+      // signal instead of downgrading to normal.
+      if (!parsed) {
+        const s = String(text)
+        const actionMatch = s.match(/"action"\s*:\s*"([^"]+)"/)
+        const toolMatch = s.match(/"tool"\s*:\s*"([^"]+)"/)
+        if (actionMatch) {
+          parsed = { action: actionMatch[1] }
+          if (toolMatch) parsed.tool = toolMatch[1]
+          // Args best-effort: scrape known fields used by current tools.
+          const sceneMatch = s.match(/"scene"\s*:\s*"([^"]*)"/)
+          const queryMatch = s.match(/"query"\s*:\s*"([^"]*)"/)
+          if (sceneMatch || queryMatch) {
+            parsed.args = {}
+            if (sceneMatch) parsed.args.scene = sceneMatch[1]
+            if (queryMatch) parsed.args.query = queryMatch[1]
+          }
+          log().warn('classifier: parsed truncated JSON via regex fallback', {
+            recovered: { action: parsed.action, tool: parsed.tool },
+          })
+        }
+      }
+      if (!parsed) return { action: 'normal' }
     }
 
     if (parsed?.action === 'force_tool' && typeof parsed.tool === 'string') {
