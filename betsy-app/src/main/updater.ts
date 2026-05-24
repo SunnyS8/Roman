@@ -93,13 +93,22 @@ export function setupAutoUpdate(mainWindow: BrowserWindow): void {
   })
 
   // First check after a short delay (let the window finish loading); then
-  // every 4 hours while the app is running.
-  setTimeout(() => {
+  // every hour while the app is running. Also re-check when the window gets
+  // refocused after >5 minutes idle — covers laptop sleep / long unfocused
+  // sessions where the interval timer may have skipped.
+  let lastCheckAt = 0
+  function check(reason: string): void {
+    lastCheckAt = Date.now()
     autoUpdater.checkForUpdates().catch((e) =>
-      log('warn', 'updater: initial check failed', { error: e instanceof Error ? e.message : String(e) }),
+      log('warn', 'updater: check failed', {
+        reason,
+        error: e instanceof Error ? e.message : String(e),
+      }),
     )
-  }, 10_000)
-  setInterval(() => {
-    autoUpdater.checkForUpdates().catch(() => {})
-  }, 4 * 60 * 60 * 1000)
+  }
+  setTimeout(() => check('initial'), 10_000)
+  setInterval(() => check('hourly'), 60 * 60 * 1000)
+  mainWindow.on('focus', () => {
+    if (Date.now() - lastCheckAt > 5 * 60 * 1000) check('on-focus')
+  })
 }
