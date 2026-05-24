@@ -145,14 +145,18 @@ describe('BackendConnector', () => {
     const c = new BackendConnector({
       url: `ws://127.0.0.1:${s.port}/ws/chat`,
       jwt: 'x',
-      backoffStartMs: 20,
+      backoffStartMs: 50,
       backoffMaxMs: 200,
     })
     c.start()
-    await new Promise((r) => setTimeout(r, 100))
+    // Let one reconnect cycle land so we know the backoff timer is the
+    // thing keeping us in flight, then stop.
+    await new Promise((r) => setTimeout(r, 200))
     c.stop()
     const after = conns
-    await new Promise((r) => setTimeout(r, 300))
+    // Wait longer than the max backoff so a leaked reconnect timer would
+    // have produced another `conns++` by now.
+    await new Promise((r) => setTimeout(r, 500))
     expect(conns).toBe(after)
     await s.close()
   })
