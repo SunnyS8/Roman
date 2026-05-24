@@ -18,7 +18,7 @@ export function BotTokenForm({ preset, publicUrl }: BotTokenFormProps): JSX.Elem
     setBusy(true)
     setError(null)
     await api.invoke('wizard:dispatch', { type: 'bot-token-submitted', token })
-    const r = await api.invoke('ssh:setBotWebhook', token, publicUrl)
+    const r = await api.invoke('ssh:setBotWebhook', token)
     setBusy(false)
     if (!r.ok) setError(r.error ?? 'unknown')
   }

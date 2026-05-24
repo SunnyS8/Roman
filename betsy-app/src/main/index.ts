@@ -207,11 +207,20 @@ void app.whenReady().then(async () => {
         return { ok: false, error: msg }
       }
     },
-    'ssh:setBotWebhook': async (token: string, publicUrl: string) => {
+    'ssh:setBotWebhook': async (token: string) => {
       if (!activeBootstrap) return { ok: false, error: 'not-connected' }
       try {
-        await activeBootstrap.setBotWebhook(token, publicUrl)
+        await activeBootstrap.setBotWebhook(token)
         dispatchInternal({ type: 'bot-webhook-ok' })
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, error: String((e as Error).message ?? e) }
+      }
+    },
+    'ssh:setEngineEnv': async (params: { geminiApiKey: string }) => {
+      if (!activeBootstrap) return { ok: false, error: 'not-connected' }
+      try {
+        await activeBootstrap.setEngineEnv(params)
         return { ok: true }
       } catch (e) {
         return { ok: false, error: String((e as Error).message ?? e) }

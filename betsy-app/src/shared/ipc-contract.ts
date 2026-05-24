@@ -35,10 +35,10 @@ export interface IpcContract {
   'hosted:openExternal': (url: string) => Promise<void>
   'ssh:connect': (creds: SshCredsDto) => Promise<{ ok: true } | { ok: false; error: string }>
   'ssh:deploy': (params: DeployParamsDto) => Promise<{ ok: boolean; error?: string }>
-  'ssh:setBotWebhook': (
-    token: string,
-    publicUrl: string,
-  ) => Promise<{ ok: boolean; error?: string }>
+  'ssh:setBotWebhook': (token: string) => Promise<{ ok: boolean; error?: string }>
+  'ssh:setEngineEnv': (params: {
+    geminiApiKey: string
+  }) => Promise<{ ok: boolean; error?: string }>
   'chat:send': (text: string) => Promise<void>
   'app:getInfo': () => Promise<AppInfo>
 }
