@@ -51,6 +51,13 @@ import { createGeminiCoachLLM } from './coach/analyzer.js'
 import { registerCronWiring, createAdminCronHandler, type CronRunners } from './cron-wiring.js'
 // P1.A — public preset catalog endpoint (no auth) consumed by Windows-app wizard.
 import { createCatalogPersonasHandler } from './personas/catalog-handler.js'
+// P1.A — Telegram deep-link login flow used by Windows-app wizard for hosted mode.
+import { TgLinkRepo } from './auth/tg-link-repo.js'
+import { TgLinkService } from './auth/tg-link-service.js'
+import {
+  createTgLinkStartHandler,
+  createTgLinkPollHandler,
+} from './auth/tg-link-http.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -335,10 +342,43 @@ export async function startMultiServer(): Promise<void> {
     logger,
   })
   const catalogPersonasHandler = createCatalogPersonasHandler()
+
+  // P1.A — wire Telegram deep-link login endpoints only when both env vars
+  // are present. Missing config is fine (current self-host installs don't
+  // need the Windows-app wizard) — endpoints just stay un-registered.
+  const tgLinkRoutes: { method: string; path: string; handler: any }[] = []
+  let tgLinkService: TgLinkService | undefined
+  let tgLinkRepo: TgLinkRepo | undefined
+  if (env.BC_TG_BOT_USERNAME && env.BC_JWT_SECRET) {
+    tgLinkRepo = new TgLinkRepo(pool)
+    tgLinkService = new TgLinkService(tgLinkRepo, {
+      botUsername: env.BC_TG_BOT_USERNAME,
+      jwtSecret: env.BC_JWT_SECRET,
+    })
+    tgLinkRoutes.push(
+      {
+        method: 'POST',
+        path: '/auth/tg-link/start',
+        handler: createTgLinkStartHandler({ service: tgLinkService }),
+      },
+      {
+        method: 'GET',
+        path: '/auth/tg-link/poll',
+        handler: createTgLinkPollHandler({ service: tgLinkService, repo: tgLinkRepo }),
+      },
+    )
+    logger.info('tg-link endpoints registered', {
+      botUsername: env.BC_TG_BOT_USERNAME,
+    })
+  } else {
+    logger.info('tg-link endpoints skipped (BC_TG_BOT_USERNAME or BC_JWT_SECRET unset)')
+  }
+
   const healthzServer = startHealthzServer(env.BC_HEALTHZ_PORT, pool, [
     { method: 'POST', path: '/oauth/token', handler: relayHandler },
     { method: 'POST', path: '/admin/cron/run', handler: adminCronHandler },
     { method: 'GET', path: '/catalog/personas', handler: catalogPersonasHandler },
+    ...tgLinkRoutes,
   ])
   logger.info('healthz server listening', { port: env.BC_HEALTHZ_PORT })
 

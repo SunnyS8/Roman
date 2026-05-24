@@ -52,6 +52,12 @@ const envSchema = z.object({
   BC_SUMMARIZER_THRESHOLD: z.coerce.number().int().min(20).default(150),
   BC_SUMMARIZER_KEEP_RECENT: z.coerce.number().int().min(10).default(50),
   BC_SUMMARIZER_DELAY_MS: z.coerce.number().int().min(0).default(30_000),
+
+  // P1.A — Telegram deep-link login (Windows-app wizard). Both optional in
+  // multi-mode: if missing, the /auth/tg-link/* endpoints are not registered
+  // (the wizard simply cannot run against this server).
+  BC_TG_BOT_USERNAME: z.string().optional(),
+  BC_JWT_SECRET: z.string().optional(),
 })
 
 export type Env = z.infer<typeof envSchema>
