@@ -58,6 +58,7 @@ import {
   createTgLinkStartHandler,
   createTgLinkPollHandler,
 } from './auth/tg-link-http.js'
+import { TgLinkSweepRunner } from './auth/tg-link-sweep.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -338,6 +339,18 @@ export async function startMultiServer(): Promise<void> {
       proposalsRepo: coachProposalsRepo,
       llm: createGeminiCoachLLM(getGemini() as any),
     }),
+    // P1.A — only wire the sweep when the wizard flow is configured.
+    ...(tgLinkRepo
+      ? {
+          tgLinkSweep: new TgLinkSweepRunner({
+            repo: tgLinkRepo,
+            logger: {
+              info: (m, meta) => logger.info(m, meta),
+              warn: (m, meta) => logger.warn(m, meta),
+            },
+          }),
+        }
+      : {}),
   }
 
   if (boss && process.env.BC_CRON_ENABLED !== '0') {

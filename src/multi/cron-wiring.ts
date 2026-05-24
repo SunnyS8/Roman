@@ -31,6 +31,15 @@ export interface CronRunners {
     registerCron: (boss: any) => Promise<void>
     runNightly: () => Promise<unknown>
   }
+  /**
+   * P1.A — Telegram-link nonce sweep. Optional: only present when the
+   * Windows-app wizard flow is enabled (BC_TG_BOT_USERNAME + BC_JWT_SECRET).
+   * Logs registration outcome but never blocks the other runners on failure.
+   */
+  tgLinkSweep?: {
+    registerCron: (boss: any) => Promise<void>
+    runOnce: () => Promise<unknown>
+  }
 }
 
 /**
@@ -71,6 +80,17 @@ export async function registerCronWiring(
     logger.warn('coach cron registration failed', {
       error: e instanceof Error ? e.message : String(e),
     })
+  }
+
+  if (runners.tgLinkSweep) {
+    try {
+      await runners.tgLinkSweep.registerCron(boss)
+      logger.info('tg-link-sweep cron registered')
+    } catch (e) {
+      logger.warn('tg-link-sweep cron registration failed', {
+        error: e instanceof Error ? e.message : String(e),
+      })
+    }
   }
 }
 
