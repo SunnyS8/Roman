@@ -59,6 +59,9 @@ import {
   createTgLinkPollHandler,
 } from './auth/tg-link-http.js'
 import { TgLinkSweepRunner } from './auth/tg-link-sweep.js'
+// P1.5 — desktop chat channel.
+import { createHistoryHandler } from './chat/history-handler.js'
+import { verifyJwt } from './auth/jwt.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -394,11 +397,30 @@ export async function startMultiServer(): Promise<void> {
     logger.info('tg-link endpoints registered')
   }
 
+  // P1.5 — desktop chat history endpoint. Only registered when JWT secret is
+  // configured (otherwise wizard-issued tokens cannot be verified anyway).
+  const chatRoutes: { method: string; path: string; handler: any }[] = []
+  if (env.BC_JWT_SECRET) {
+    chatRoutes.push({
+      method: 'GET',
+      path: '/chat/history',
+      handler: createHistoryHandler({
+        verifyJwt: (token) => {
+          const p = verifyJwt(token, env.BC_JWT_SECRET!)
+          return p && typeof p.sub === 'string' ? { sub: p.sub } : null
+        },
+        listBefore: (ws, before, limit) => convRepo.listBefore(ws, before, limit),
+      }),
+    })
+    logger.info('chat history endpoint registered')
+  }
+
   const healthzServer = startHealthzServer(env.BC_HEALTHZ_PORT, pool, [
     { method: 'POST', path: '/oauth/token', handler: relayHandler },
     { method: 'POST', path: '/admin/cron/run', handler: adminCronHandler },
     { method: 'GET', path: '/catalog/personas', handler: catalogPersonasHandler },
     ...tgLinkRoutes,
+    ...chatRoutes,
   ])
   logger.info('healthz server listening', { port: env.BC_HEALTHZ_PORT })
 
