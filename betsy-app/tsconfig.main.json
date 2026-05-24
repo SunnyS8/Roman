@@ -5,8 +5,8 @@
     "moduleResolution": "node",
     "target": "ES2022",
     "outDir": "dist/main",
-    "rootDir": "src/main",
+    "rootDir": "src",
     "types": ["node"]
   },
-  "include": ["src/main/**/*"]
+  "include": ["src/main/**/*", "src/shared/**/*"]
 }

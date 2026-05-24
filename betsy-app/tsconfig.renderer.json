@@ -10,5 +10,10 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/**/*", "src/main/wizard-engine.ts", "src/main/ipc.ts"]
+  "include": [
+    "src/renderer/**/*",
+    "src/shared/**/*",
+    "src/main/wizard-engine.ts",
+    "src/main/persona-cache.ts"
+  ]
 }
