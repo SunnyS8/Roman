@@ -138,8 +138,7 @@ export function App(): JSX.Element {
   } else if (state.step === 'selfhost-install' && preset) {
     body = <InstallProgress preset={preset} state={state} />
   } else if (state.step === 'selfhost-bot-token' && preset) {
-    const publicUrl = deployCtx.current?.publicUrl ?? (state.sshHost ? `http://${state.sshHost}:3777` : '')
-    body = <BotTokenForm preset={preset} publicUrl={publicUrl} />
+    body = <BotTokenForm preset={preset} />
   } else if (state.step === 'done') {
     body = <DeferredChatPlaceholder />
   } else {
