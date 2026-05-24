@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from './ipc'
 import { PersonaPicker } from './wizard/PersonaPicker'
+import { ModeSelect } from './wizard/ModeSelect'
 import { WizardShell } from './wizard/WizardShell'
 import type { WizardState } from '../main/wizard-engine'
 import type { CachedPreset } from '../main/persona-cache'
@@ -83,6 +84,15 @@ export function App(): JSX.Element {
         avatars={avatars}
         onSelect={(presetId) => {
           void dispatch({ type: 'persona-selected', presetId })
+        }}
+      />
+    )
+  } else if (state.step === 'mode-select' && preset) {
+    body = (
+      <ModeSelect
+        preset={preset}
+        onSelect={(mode) => {
+          void dispatch({ type: 'mode-selected', mode })
         }}
       />
     )
