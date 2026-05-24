@@ -176,6 +176,11 @@ export interface RunBetsyDeps {
   /** FIX2 — feedback service, exposed for future coach agent tools. Optional;
    *  not consumed by the runtime agent loop itself. */
   feedbackService?: import('../feedback/service.js').FeedbackService
+  /** P1.5 — cross-channel live mirror coordinator. When set, the bot-router
+   *  / agents-runner call afterPrimarySend(...) after a successful primary
+   *  channel send so DesktopAdapters receive a `message-from-other-channel`
+   *  echo. Optional; absent in single-channel installs and tests. */
+  outboundDispatcher?: import('../channels/outbound-dispatcher.js').OutboundDispatcher
 }
 
 /**

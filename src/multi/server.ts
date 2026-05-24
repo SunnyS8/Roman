@@ -62,6 +62,8 @@ import { TgLinkSweepRunner } from './auth/tg-link-sweep.js'
 // P1.5 — desktop chat channel.
 import { createHistoryHandler } from './chat/history-handler.js'
 import { verifyJwt } from './auth/jwt.js'
+import { DesktopAdapter } from './channels/desktop.js'
+import { OutboundDispatcher } from './channels/outbound-dispatcher.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -154,6 +156,23 @@ export async function startMultiServer(): Promise<void> {
     logger.info('max adapter configured')
   }
 
+  // P1.5 — Desktop channel via WebSocket. Only registered when JWT secret is
+  // configured (no JWT → wizard cannot issue tokens → no desktop clients).
+  let desktopAdapter: DesktopAdapter | undefined
+  let outboundDispatcher: OutboundDispatcher | undefined
+  if (env.BC_JWT_SECRET) {
+    desktopAdapter = new DesktopAdapter({
+      verifyJwt: (token) => {
+        const p = verifyJwt(token, env.BC_JWT_SECRET!)
+        return p && typeof p.sub === 'string' ? { sub: p.sub } : null
+      },
+    })
+    channels.desktop = desktopAdapter
+    outboundDispatcher = new OutboundDispatcher()
+    outboundDispatcher.registerDesktop(desktopAdapter)
+    logger.info('desktop adapter configured')
+  }
+
   // WAVE3C-MERGE: per-workspace OAuth + MCP plumbing. Both opt-in: if
   // BC_OAUTH_ENC_KEY is missing OAuthRepo still constructs (lazy crypto), but
   // the integration tools will surface errors gracefully.
@@ -225,6 +244,9 @@ export async function startMultiServer(): Promise<void> {
     // is not registered here yet — pg-boss isn't initialised in server.ts (see
     // learner cron TODO above).
     coachProposalsRepo,
+    // P1.5 — cross-channel live mirror. Undefined when desktop adapter isn't
+    // configured, which makes the bot-router / runner mirror calls a no-op.
+    outboundDispatcher,
   }
 
   // P1.A — build TgLink components up-front so the router can route
@@ -415,13 +437,23 @@ export async function startMultiServer(): Promise<void> {
     logger.info('chat history endpoint registered')
   }
 
-  const healthzServer = startHealthzServer(env.BC_HEALTHZ_PORT, pool, [
-    { method: 'POST', path: '/oauth/token', handler: relayHandler },
-    { method: 'POST', path: '/admin/cron/run', handler: adminCronHandler },
-    { method: 'GET', path: '/catalog/personas', handler: catalogPersonasHandler },
-    ...tgLinkRoutes,
-    ...chatRoutes,
-  ])
+  const healthzServer = startHealthzServer(env.BC_HEALTHZ_PORT, pool, {
+    extraRoutes: [
+      { method: 'POST', path: '/oauth/token', handler: relayHandler },
+      { method: 'POST', path: '/admin/cron/run', handler: adminCronHandler },
+      { method: 'GET', path: '/catalog/personas', handler: catalogPersonasHandler },
+      ...tgLinkRoutes,
+      ...chatRoutes,
+    ],
+    // P1.5 — WS upgrade for /ws/chat goes through the DesktopAdapter.
+    // No adapter → no upgrade handler → upgrades fall through to socket destroy.
+    ...(desktopAdapter
+      ? {
+          upgrade: (req, socket, head) =>
+            desktopAdapter!.handleUpgrade(req, socket, head),
+        }
+      : {}),
+  })
   logger.info('healthz server listening', { port: env.BC_HEALTHZ_PORT })
 
   // Graceful shutdown — wait up to 5 min for in-flight tool work (selfie
