@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react'
 import { api } from './ipc'
 import { PersonaPicker } from './wizard/PersonaPicker'
 import { ModeSelect } from './wizard/ModeSelect'
+import { HostedLogin } from './wizard/hosted/HostedLogin'
+import { HostedWaiting } from './wizard/hosted/HostedWaiting'
 import { WizardShell } from './wizard/WizardShell'
 import type { WizardState } from '../main/wizard-engine'
 import type { CachedPreset } from '../main/persona-cache'
@@ -96,6 +98,10 @@ export function App(): JSX.Element {
         }}
       />
     )
+  } else if (state.step === 'hosted-login' && preset) {
+    body = <HostedLogin preset={preset} />
+  } else if (state.step === 'hosted-waiting' && preset) {
+    body = <HostedWaiting preset={preset} deepLink={state.hostedDeepLink} />
   } else if (state.step === 'done') {
     body = (
       <div>
