@@ -88,7 +88,17 @@ ${genderBlock}
     const o = config.owner;
     const parts: string[] = [];
     if (o.name) {
-      parts.push(`Его зовут: ${o.name}`);
+      // Couple the name with the "rarely-by-name" rule right here. Putting
+      // the rule far away in another instructions block doesn't work — LLM
+      // sees "его зовут X" early in the prompt as a strong signal to address
+      // by name in every reply. The rule has to sit next to the name.
+      parts.push(
+        `Его зовут: ${o.name}. ВАЖНО: имя используй РЕДКО — только в первом ` +
+          `приветствии после долгой паузы или в особо эмоциональные моменты. ` +
+          `В обычном диалоге обращайся БЕЗ имени, как в живом чате с близким ` +
+          `человеком. Постоянное «${o.name}, ...» в каждом ответе звучит ` +
+          `формально и раздражает.`,
+      );
     }
     if (o.addressAs) {
       parts.push(`Обращайся к нему: ${o.addressAs}`);
