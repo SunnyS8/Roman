@@ -1,0 +1,145 @@
+name: release-app
+
+# Triggered by pushing an "app-vX.Y.Z" tag (or manual dispatch).
+# Builds the Electron installer (betsy-app/), signs it if WIN_CSC_* secrets
+# are present, and publishes the artifacts to the R2 update bucket so
+# electron-updater clients can find the new release.
+on:
+  push:
+    tags:
+      - 'app-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'App version (semver, no leading v)'
+        required: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install betsy-app deps
+        working-directory: betsy-app
+        run: npm ci
+
+      - name: Extract version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF#refs/tags/app-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump betsy-app version
+        working-directory: betsy-app
+        shell: bash
+        run: npm version "${{ steps.ver.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Build + sign + publish (electron-builder)
+        working-directory: betsy-app
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Empty WIN_CSC_LINK means electron-builder ships unsigned — fine
+          # until EV cert is procured. Once present, electron-builder will sign.
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npm run build && npx electron-builder --win --x64 --publish always
+
+      - name: List release artifacts
+        working-directory: betsy-app
+        shell: bash
+        run: ls -la release/
+
+      - name: Configure AWS CLI for R2
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+        shell: bash
+        run: |
+          mkdir -p ~/.aws
+          cat > ~/.aws/credentials <<EOF
+          [default]
+          aws_access_key_id=${R2_ACCESS_KEY_ID}
+          aws_secret_access_key=${R2_SECRET_ACCESS_KEY}
+          EOF
+          cat > ~/.aws/config <<EOF
+          [default]
+          region=auto
+          EOF
+
+      - name: Upload artifacts to R2
+        working-directory: betsy-app
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        shell: bash
+        run: |
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BUCKET="s3://betsy-updates/electron/win-x64"
+          # Upload every installer-related artifact electron-builder produced.
+          shopt -s nullglob
+          for f in release/*.exe release/*.exe.blockmap release/latest.yml; do
+            [ -f "$f" ] || continue
+            BN="$(basename "$f")"
+            CT="application/octet-stream"
+            case "$BN" in
+              *.yml)        CT="text/yaml" ;;
+              *.exe)        CT="application/vnd.microsoft.portable-executable" ;;
+              *.blockmap)   CT="application/octet-stream" ;;
+            esac
+            echo "uploading $f -> $BUCKET/$BN ($CT)"
+            aws s3 cp "$f" "$BUCKET/$BN" \
+              --endpoint-url "$ENDPOINT" \
+              --content-type "$CT" \
+              --cache-control "public, max-age=60"
+          done
+
+          # Maintain a stable "latest" installer URL for the download page.
+          # electron-builder names the installer "Betsy Setup ${version}.exe".
+          # Prefer that, but fall back to any *.exe if the name changes.
+          SRC=""
+          if [ -f "release/Betsy Setup ${VERSION}.exe" ]; then
+            SRC="release/Betsy Setup ${VERSION}.exe"
+          else
+            SRC="$(ls release/*.exe | head -n1)"
+          fi
+          if [ -n "$SRC" ] && [ -f "$SRC" ]; then
+            echo "publishing latest pointer from $SRC"
+            aws s3 cp "$SRC" "$BUCKET/Betsy-Setup-latest.exe" \
+              --endpoint-url "$ENDPOINT" \
+              --content-type "application/vnd.microsoft.portable-executable" \
+              --cache-control "public, max-age=60"
+          fi
+
+      - name: Upload release artifacts (GitHub)
+        uses: actions/upload-artifact@v4
+        with:
+          name: betsy-app-${{ steps.ver.outputs.version }}-win-x64
+          path: |
+            betsy-app/release/*.exe
+            betsy-app/release/*.exe.blockmap
+            betsy-app/release/latest.yml
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Summary
+        shell: bash
+        run: |
+          echo "### App release published" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ steps.ver.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Installer: https://updates.betsyai.io/electron/win-x64/Betsy-Setup-latest.exe" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Update manifest: https://updates.betsyai.io/electron/win-x64/latest.yml" >> "$GITHUB_STEP_SUMMARY"
