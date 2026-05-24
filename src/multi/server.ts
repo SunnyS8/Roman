@@ -223,6 +223,23 @@ export async function startMultiServer(): Promise<void> {
     coachProposalsRepo,
   }
 
+  // P1.A — build TgLink components up-front so the router can route
+  // `/start <nonce>` from the Windows-app wizard deep-link. Skipped silently
+  // when the required env is not set (self-host installs that don't use the
+  // hosted login flow).
+  let tgLinkRepo: TgLinkRepo | undefined
+  let tgLinkService: TgLinkService | undefined
+  if (env.BC_TG_BOT_USERNAME && env.BC_JWT_SECRET) {
+    tgLinkRepo = new TgLinkRepo(pool)
+    tgLinkService = new TgLinkService(tgLinkRepo, {
+      botUsername: env.BC_TG_BOT_USERNAME,
+      jwtSecret: env.BC_JWT_SECRET,
+    })
+    logger.info('tg-link service ready', { botUsername: env.BC_TG_BOT_USERNAME })
+  } else {
+    logger.info('tg-link service skipped (BC_TG_BOT_USERNAME or BC_JWT_SECRET unset)')
+  }
+
   const router = new BotRouter({
     wsRepo,
     personaRepo,
@@ -233,6 +250,7 @@ export async function startMultiServer(): Promise<void> {
     runBetsyFn: runBetsy,
     runBetsyStreamFn: runBetsyStream,
     runBetsyDeps,
+    tgLinkService,
   })
   router.attach()
 
@@ -343,18 +361,11 @@ export async function startMultiServer(): Promise<void> {
   })
   const catalogPersonasHandler = createCatalogPersonasHandler()
 
-  // P1.A — wire Telegram deep-link login endpoints only when both env vars
-  // are present. Missing config is fine (current self-host installs don't
-  // need the Windows-app wizard) — endpoints just stay un-registered.
+  // P1.A — wire Telegram deep-link login HTTP endpoints. Only registered
+  // when tgLinkService was constructed above; otherwise the wizard endpoints
+  // stay 404 (acceptable for self-host installs that don't run the wizard).
   const tgLinkRoutes: { method: string; path: string; handler: any }[] = []
-  let tgLinkService: TgLinkService | undefined
-  let tgLinkRepo: TgLinkRepo | undefined
-  if (env.BC_TG_BOT_USERNAME && env.BC_JWT_SECRET) {
-    tgLinkRepo = new TgLinkRepo(pool)
-    tgLinkService = new TgLinkService(tgLinkRepo, {
-      botUsername: env.BC_TG_BOT_USERNAME,
-      jwtSecret: env.BC_JWT_SECRET,
-    })
+  if (tgLinkService && tgLinkRepo) {
     tgLinkRoutes.push(
       {
         method: 'POST',
@@ -367,11 +378,7 @@ export async function startMultiServer(): Promise<void> {
         handler: createTgLinkPollHandler({ service: tgLinkService, repo: tgLinkRepo }),
       },
     )
-    logger.info('tg-link endpoints registered', {
-      botUsername: env.BC_TG_BOT_USERNAME,
-    })
-  } else {
-    logger.info('tg-link endpoints skipped (BC_TG_BOT_USERNAME or BC_JWT_SECRET unset)')
+    logger.info('tg-link endpoints registered')
   }
 
   const healthzServer = startHealthzServer(env.BC_HEALTHZ_PORT, pool, [

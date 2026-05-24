@@ -15,6 +15,8 @@ import {
   isOnboardingComplete,
 } from './onboarding-flow.js'
 import { handleCommand } from './commands.js'
+import { handleStartCommand } from './tg-link-start.js'
+import type { TgLinkService } from '../auth/tg-link-service.js'
 import { log } from '../observability/logger.js'
 import { drainPendingMedia, clearPendingMedia } from '../agents/pending-media.js'
 import { getChatAction, clearChatAction } from '../agents/chat-action-state.js'
@@ -69,7 +71,13 @@ export interface BotRouterDeps {
    *  streamMessage, used in preference to runBetsyFn for normal messages. */
   runBetsyStreamFn?: typeof runBetsyStreamType
   runBetsyDeps: RunBetsyDeps
+  /** P1.A — when set, `/start <nonce>` from the Windows-app wizard deep-link
+   *  routes through {@link handleStartCommand} to bind the workspace to the
+   *  chosen preset before the normal onboarding flow runs. */
+  tgLinkService?: TgLinkService
 }
+
+const TG_START_NONCE_RE = /^\/start(?:@\S+)?\s+(\S.*)$/
 
 const LINK_CODE_RE = /^\s*(\d{6})\s*$/
 
@@ -280,6 +288,49 @@ export class BotRouter {
       const channel = this.deps.channels[ev.channel]
       if (!channel) {
         log().warn('inbound: no channel adapter', { channel: ev.channel })
+        return
+      }
+
+      // P1.A — Windows-app wizard deep-link: `/start <nonce>` from Telegram.
+      // Handled BEFORE workspace resolution because the start handler is the
+      // one that creates the workspace (binding it to the chosen preset).
+      // Plain `/start` (no payload) falls through to the existing onboarding
+      // path below.
+      const startNonceMatch =
+        ev.channel === 'telegram' && this.deps.tgLinkService
+          ? ev.text.match(TG_START_NONCE_RE)
+          : null
+      if (startNonceMatch) {
+        const payload = startNonceMatch[1].trim()
+        log().info('routing: tg-link /start <nonce>', {
+          tgUserId: ev.userId,
+          payloadLen: payload.length,
+        })
+        try {
+          await handleStartCommand(
+            { tgUserId: Number(ev.userId), payload },
+            {
+              tgLinkService: this.deps.tgLinkService!,
+              workspaces: this.deps.wsRepo,
+              personas: this.deps.personaRepo,
+              sendMessage: async (tgUserId, text) => {
+                await channel.sendMessage({ chatId: String(tgUserId), text })
+              },
+              // No plainStart — payload is guaranteed non-empty by the regex above.
+            },
+          )
+        } catch (e) {
+          log().error('tg-link /start handler failed', {
+            tgUserId: ev.userId,
+            error: e instanceof Error ? e.message : String(e),
+          })
+          await channel
+            .sendMessage({
+              chatId: ev.chatId,
+              text: 'Не получилось привязать Бетси. Попробуй ещё раз через минуту 💙',
+            })
+            .catch(() => {})
+        }
         return
       }
 
