@@ -335,10 +335,24 @@ export class BotRouter {
       }
 
       // Resolve workspace
-      const workspace =
-        ev.channel === 'telegram'
-          ? await this.deps.wsRepo.upsertForTelegram(Number(ev.userId))
-          : await this.deps.wsRepo.upsertForMax(Number(ev.userId))
+      // Desktop: ev.userId is the workspaceId (UUID) set by DesktopAdapter
+      // from the verified JWT, so we look up directly. TG/Max: userId is the
+      // numeric chat id, upsert by it.
+      let workspace
+      if (ev.channel === 'desktop') {
+        const found = await this.deps.wsRepo.findById(ev.userId)
+        if (!found) {
+          log().warn('desktop inbound: workspace not found, dropping', {
+            workspaceId: ev.userId,
+          })
+          return
+        }
+        workspace = found
+      } else if (ev.channel === 'telegram') {
+        workspace = await this.deps.wsRepo.upsertForTelegram(Number(ev.userId))
+      } else {
+        workspace = await this.deps.wsRepo.upsertForMax(Number(ev.userId))
+      }
 
       log().info('workspace resolved', {
         workspaceId: workspace.id,
