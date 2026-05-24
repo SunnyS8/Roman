@@ -12,7 +12,9 @@
     "start": "electron .",
     "dist": "npm run build && electron-builder --win --x64",
     "typecheck": "tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.preload.json && tsc --noEmit -p tsconfig.renderer.json",
+    "pretest": "node scripts/use-node-abi.cjs",
     "test": "vitest run",
+    "preelectron": "node scripts/use-electron-abi.cjs",
     "test:e2e": "playwright test",
     "postinstall": "electron-builder install-app-deps"
   },
