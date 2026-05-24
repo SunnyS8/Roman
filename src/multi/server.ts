@@ -170,7 +170,15 @@ export async function startMultiServer(): Promise<void> {
     channels.desktop = desktopAdapter
     outboundDispatcher = new OutboundDispatcher()
     outboundDispatcher.registerDesktop(desktopAdapter)
-    logger.info('desktop adapter configured')
+    // Register non-desktop adapters as broadcast targets so the conversation
+    // stays in sync across all channels the user has connected. Each adapter
+    // only delivers if there's a corresponding ownerTgId/ownerMaxId on the
+    // workspace (set by the original /start in that channel).
+    if (channels.telegram) outboundDispatcher.registerPlain(channels.telegram)
+    if (channels.max) outboundDispatcher.registerPlain(channels.max)
+    logger.info('desktop adapter + outbound dispatcher configured', {
+      plainTargets: Object.keys(channels).filter((k) => k !== 'desktop'),
+    })
   }
 
   // WAVE3C-MERGE: per-workspace OAuth + MCP plumbing. Both opt-in: if

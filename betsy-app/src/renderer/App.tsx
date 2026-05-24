@@ -93,8 +93,8 @@ export function App(): JSX.Element {
   }
 
   // Once the wizard reaches `done` we leave the WizardShell entirely and
-  // hand over the whole window to the chat UI. The Settings button is still
-  // available as a fixed-position overlay.
+  // hand over the whole window to the chat UI. Settings live as an icon in
+  // the chat header (no more bottom-corner overlay that clashed with Send).
   if (state.step === 'done') {
     const handleReauth = async (): Promise<void> => {
       await dispatch({ type: 'reset' })
@@ -107,14 +107,8 @@ export function App(): JSX.Element {
           onReauth={() => {
             void handleReauth()
           }}
+          onSettings={() => setShowSettings(true)}
         />
-        <button
-          type="button"
-          onClick={() => setShowSettings(true)}
-          className="fixed bottom-4 right-4 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 rounded text-sm border border-neutral-700"
-        >
-          Настройки
-        </button>
         {showSettings && <ControlPanel onClose={() => setShowSettings(false)} />}
       </>
     )

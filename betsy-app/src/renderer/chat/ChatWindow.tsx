@@ -8,9 +8,10 @@ interface Props {
   personaName: string
   avatarUrl: string | null
   onReauth: () => void
+  onSettings?: () => void
 }
 
-export function ChatWindow({ personaName, avatarUrl, onReauth }: Props): JSX.Element {
+export function ChatWindow({ personaName, avatarUrl, onReauth, onSettings }: Props): JSX.Element {
   const { state, send, loadOlder } = useChat()
 
   if (state.status === 'auth-failed') {
@@ -19,7 +20,12 @@ export function ChatWindow({ personaName, avatarUrl, onReauth }: Props): JSX.Ele
 
   return (
     <div className="h-screen flex flex-col bg-neutral-950">
-      <AvatarHeader personaName={personaName} avatarUrl={avatarUrl} status={state.status} />
+      <AvatarHeader
+        personaName={personaName}
+        avatarUrl={avatarUrl}
+        status={state.status}
+        onSettings={onSettings}
+      />
       <MessageList
         messages={state.messages}
         streaming={state.streaming}
