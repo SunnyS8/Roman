@@ -14,7 +14,6 @@
   "win": {
     "target": ["nsis"],
     "icon": "resources/icons/betsy.ico",
-    "publisherName": "Betsy AI",
     "signingHashAlgorithms": ["sha256"]
   },
   "nsis": {
