@@ -1,0 +1,29 @@
+version: '3.9'
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: betsy
+      POSTGRES_PASSWORD: ${BC_DB_PASSWORD}
+      POSTGRES_DB: betsy
+    volumes:
+      - betsy-pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  betsy:
+    image: ghcr.io/betsyai/betsy-multi:${BC_ENGINE_VERSION:-latest}
+    environment:
+      BETSY_MODE: multi
+      BC_DATABASE_URL: postgres://betsy:${BC_DB_PASSWORD}@postgres:5432/betsy
+      BC_JWT_SECRET: ${BC_JWT_SECRET}
+      BC_TG_BOT_TOKEN: ${BC_TG_BOT_TOKEN}
+      BC_PUBLIC_URL: ${BC_PUBLIC_URL}
+      BC_PERSONA_PRESET_ID: ${BC_PERSONA_PRESET_ID}
+    ports:
+      - '${BC_PORT:-3777}:3777'
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  betsy-pg:
