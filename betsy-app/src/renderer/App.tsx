@@ -1,9 +1,12 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { api } from './ipc'
 import { PersonaPicker } from './wizard/PersonaPicker'
 import { ModeSelect } from './wizard/ModeSelect'
 import { HostedLogin } from './wizard/hosted/HostedLogin'
 import { HostedWaiting } from './wizard/hosted/HostedWaiting'
+import { SshForm } from './wizard/selfhost/SshForm'
+import { InstallProgress } from './wizard/selfhost/InstallProgress'
+import { BotTokenForm } from './wizard/selfhost/BotTokenForm'
 import { WizardShell } from './wizard/WizardShell'
 import type { WizardState } from '../main/wizard-engine'
 import type { CachedPreset } from '../main/persona-cache'
@@ -35,10 +38,17 @@ function getHeaderLine(state: WizardState, preset: CachedPreset | undefined): st
   }
 }
 
+interface DeployContext {
+  host: string
+  port: number
+  publicUrl: string
+}
+
 export function App(): JSX.Element {
   const [state, setState] = useState<WizardState | null>(null)
   const [presets, setPresets] = useState<CachedPreset[]>([])
   const [avatars, setAvatars] = useState<Record<string, string | null>>({})
+  const deployCtx = useRef<DeployContext | null>(null)
 
   const loadState = useCallback(async () => {
     const s = await api.invoke('wizard:getState')
@@ -72,7 +82,9 @@ export function App(): JSX.Element {
   const preset = presets.find((p) => p.id === state.selectedPresetId)
   const headerLine = getHeaderLine(state, preset)
 
-  const dispatch = async (event: Parameters<typeof api.invoke<'wizard:dispatch'>>[1]): Promise<void> => {
+  const dispatch = async (
+    event: Parameters<typeof api.invoke<'wizard:dispatch'>>[1],
+  ): Promise<void> => {
     const next = await api.invoke('wizard:dispatch', event)
     setState(next)
   }
@@ -102,6 +114,29 @@ export function App(): JSX.Element {
     body = <HostedLogin preset={preset} />
   } else if (state.step === 'hosted-waiting' && preset) {
     body = <HostedWaiting preset={preset} deepLink={state.hostedDeepLink} />
+  } else if (state.step === 'selfhost-ssh-form' && preset) {
+    body = (
+      <SshForm
+        preset={preset}
+        onSubmitted={(params) => {
+          const publicUrl = `http://${params.host}:3777`
+          deployCtx.current = { host: params.host, port: params.port, publicUrl }
+          void api.invoke('ssh:deploy', {
+            presetId: preset.id,
+            publicUrl,
+            saveCreds: params.saveCreds,
+            host: params.host,
+            user: params.user,
+            port: params.port,
+          })
+        }}
+      />
+    )
+  } else if (state.step === 'selfhost-install' && preset) {
+    body = <InstallProgress preset={preset} state={state} />
+  } else if (state.step === 'selfhost-bot-token' && preset) {
+    const publicUrl = deployCtx.current?.publicUrl ?? (state.sshHost ? `http://${state.sshHost}:3777` : '')
+    body = <BotTokenForm preset={preset} publicUrl={publicUrl} />
   } else if (state.step === 'done') {
     body = (
       <div>
@@ -113,19 +148,20 @@ export function App(): JSX.Element {
       </div>
     )
   } else {
-    // Step routing for subsequent tasks (11-13) — placeholder for now.
     body = (
       <div>
         <h2 className="text-lg mb-2">Step: {state.step}</h2>
-        <p className="text-neutral-500 text-sm">
-          UI для этого шага будет добавлен в следующих задачах плана.
-        </p>
+        <p className="text-neutral-500 text-sm">Нет данных персонажа для этого шага.</p>
       </div>
     )
   }
 
   return (
-    <WizardShell state={state} avatarPath={preset ? avatars[preset.id] ?? null : null} headerLine={headerLine}>
+    <WizardShell
+      state={state}
+      avatarPath={preset ? avatars[preset.id] ?? null : null}
+      headerLine={headerLine}
+    >
       {body}
     </WizardShell>
   )

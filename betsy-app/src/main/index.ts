@@ -3,8 +3,10 @@ import { join } from 'node:path'
 import { log } from './logger'
 import { reduce, initialState, type WizardState, type WizardEvent } from './wizard-engine'
 import { PersonaCache } from './persona-cache'
-import { registerIpcHandlers } from './ipc'
+import { registerIpcHandlers, type SshCredsDto, type DeployParamsDto } from './ipc'
 import { HostedAuth } from './hosted-auth'
+import { SshBootstrap } from './ssh-bootstrap'
+import { SecureStorage } from './secure-storage'
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const apiBase = process.env.BC_API_BASE ?? 'https://api.betsyai.io'
@@ -12,8 +14,15 @@ const apiBase = process.env.BC_API_BASE ?? 'https://api.betsyai.io'
 let mainWindow: BrowserWindow | null = null
 let wizardState: WizardState = initialState()
 let personaCache: PersonaCache | null = null
+let secureStorage: SecureStorage | null = null
 const hostedAuth = new HostedAuth(apiBase)
 let activePollNonce: string | null = null
+let activeBootstrap: SshBootstrap | null = null
+let lastDeployedPublicUrl: string | null = null
+
+function resourcesDir(): string {
+  return app.isPackaged ? process.resourcesPath : join(__dirname, '..', '..', 'resources')
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -53,9 +62,8 @@ function dispatchInternal(event: WizardEvent): void {
 
 async function runPollLoop(nonce: string): Promise<void> {
   activePollNonce = nonce
-  // Up to ~6 minutes total — 12 rounds * 30s long-poll
   for (let i = 0; i < 12; i++) {
-    if (activePollNonce !== nonce) return // newer login started
+    if (activePollNonce !== nonce) return
     try {
       const r = await hostedAuth.poll(nonce, 30_000)
       if (activePollNonce !== nonce) return
@@ -77,13 +85,11 @@ async function runPollLoop(nonce: string): Promise<void> {
         log('warn', 'hosted-poll-error', { status: r.status })
         break
       }
-      // kind === 'timeout' — continue loop
     } catch (e) {
       log('warn', 'hosted-poll-throw', { err: String(e) })
       await new Promise((res) => setTimeout(res, 5_000))
     }
   }
-  // exhausted retries
   if (activePollNonce === nonce) {
     dispatchInternal({ type: 'hosted-poll-timeout' })
     activePollNonce = null
@@ -94,6 +100,8 @@ void app.whenReady().then(async () => {
   log('info', 'app-ready', { apiBase })
 
   personaCache = new PersonaCache(join(app.getPath('userData'), 'persona-cache'), apiBase)
+  secureStorage = new SecureStorage(join(app.getPath('userData'), 'secure.json'))
+
   if (!personaCache.hasAny()) {
     try {
       await personaCache.refresh()
@@ -128,10 +136,85 @@ void app.whenReady().then(async () => {
     'hosted:openExternal': async (url: string) => {
       await shell.openExternal(url)
     },
+    'ssh:connect': async (creds: SshCredsDto) => {
+      activeBootstrap?.disconnect()
+      activeBootstrap = new SshBootstrap(creds, resourcesDir())
+      activeBootstrap.on('progress', (e) => {
+        mainWindow?.webContents.send('install:progress', e)
+        if (typeof (e as { pct?: number }).pct === 'number') {
+          dispatchInternal({
+            type: 'install-progress',
+            pct: (e as { pct: number }).pct,
+            logLine: (e as { log?: string }).log,
+          })
+        }
+      })
+      activeBootstrap.on('stdout', (s: string) => {
+        mainWindow?.webContents.send('install:log', s)
+      })
+      activeBootstrap.on('stderr', (s: string) => {
+        mainWindow?.webContents.send('install:log', s)
+      })
+      try {
+        await activeBootstrap.connect()
+        return { ok: true as const }
+      } catch (e) {
+        return { ok: false as const, error: String((e as Error).message ?? e) }
+      }
+    },
+    'ssh:deploy': async (params: DeployParamsDto) => {
+      if (!activeBootstrap) return { ok: false, error: 'not-connected' }
+      try {
+        const gen = await activeBootstrap.deploy({
+          presetId: params.presetId,
+          publicUrl: params.publicUrl,
+          port: params.port,
+          botToken: params.botToken,
+          engineVersion: params.engineVersion,
+        })
+        lastDeployedPublicUrl = params.publicUrl
+        if (params.saveCreds && params.host && params.user) {
+          try {
+            secureStorage!.set(
+              'ssh',
+              JSON.stringify({
+                host: params.host,
+                port: params.port ?? 22,
+                user: params.user,
+                dbPassword: gen.dbPassword,
+              }),
+            )
+          } catch (e) {
+            log('warn', 'secure-storage-save-failed', { err: String(e) })
+          }
+        }
+        dispatchInternal({ type: 'install-done' })
+        return { ok: true }
+      } catch (e) {
+        const msg = String((e as Error).message ?? e)
+        dispatchInternal({ type: 'install-failed', error: msg })
+        return { ok: false, error: msg }
+      }
+    },
+    'ssh:setBotWebhook': async (token: string, publicUrl: string) => {
+      if (!activeBootstrap) return { ok: false, error: 'not-connected' }
+      try {
+        await activeBootstrap.setBotWebhook(token, publicUrl)
+        dispatchInternal({ type: 'bot-webhook-ok' })
+        return { ok: true }
+      } catch (e) {
+        return { ok: false, error: String((e as Error).message ?? e) }
+      }
+    },
     'app:getInfo': async () => ({
       version: app.getVersion(),
       mode: wizardState.mode,
-      engineUrl: wizardState.mode === 'hosted' ? apiBase : null,
+      engineUrl:
+        wizardState.mode === 'hosted'
+          ? apiBase
+          : wizardState.mode === 'selfhost'
+            ? lastDeployedPublicUrl
+            : null,
     }),
   })
 
