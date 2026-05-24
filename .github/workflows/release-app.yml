@@ -28,12 +28,16 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      # Both lockfiles were generated with .npmrc omit=optional (ssh2's
+      # buildcheck/cpu-features need a C++ toolchain that's not on the dev
+      # box, and ssh2 works fine without them). Match that on CI so npm ci
+      # finds an in-sync lock.
       - name: Install root deps
-        run: npm ci
+        run: npm ci --omit=optional
 
       - name: Install betsy-app deps
         working-directory: betsy-app
-        run: npm ci
+        run: npm ci --omit=optional
 
       - name: Extract version
         id: ver
