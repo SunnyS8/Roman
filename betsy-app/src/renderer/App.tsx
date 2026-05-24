@@ -7,6 +7,8 @@ import { HostedWaiting } from './wizard/hosted/HostedWaiting'
 import { SshForm } from './wizard/selfhost/SshForm'
 import { InstallProgress } from './wizard/selfhost/InstallProgress'
 import { BotTokenForm } from './wizard/selfhost/BotTokenForm'
+import { DeferredChatPlaceholder } from './chat/DeferredChatPlaceholder'
+import { ControlPanel } from './control-panel/ControlPanel'
 import { WizardShell } from './wizard/WizardShell'
 import type { WizardState } from '../main/wizard-engine'
 import type { CachedPreset } from '../main/persona-cache'
@@ -48,6 +50,7 @@ export function App(): JSX.Element {
   const [state, setState] = useState<WizardState | null>(null)
   const [presets, setPresets] = useState<CachedPreset[]>([])
   const [avatars, setAvatars] = useState<Record<string, string | null>>({})
+  const [showSettings, setShowSettings] = useState(false)
   const deployCtx = useRef<DeployContext | null>(null)
 
   const loadState = useCallback(async () => {
@@ -138,15 +141,7 @@ export function App(): JSX.Element {
     const publicUrl = deployCtx.current?.publicUrl ?? (state.sshHost ? `http://${state.sshHost}:3777` : '')
     body = <BotTokenForm preset={preset} publicUrl={publicUrl} />
   } else if (state.step === 'done') {
-    body = (
-      <div>
-        <h2 className="text-xl mb-2">Готово</h2>
-        <p className="text-neutral-400">
-          Бетси настроена. Окно чата появится после следующего этапа разработки (desktop-channel).
-          А пока — пиши в Telegram.
-        </p>
-      </div>
-    )
+    body = <DeferredChatPlaceholder />
   } else {
     body = (
       <div>
@@ -157,12 +152,24 @@ export function App(): JSX.Element {
   }
 
   return (
-    <WizardShell
-      state={state}
-      avatarPath={preset ? avatars[preset.id] ?? null : null}
-      headerLine={headerLine}
-    >
-      {body}
-    </WizardShell>
+    <>
+      <WizardShell
+        state={state}
+        avatarPath={preset ? avatars[preset.id] ?? null : null}
+        headerLine={headerLine}
+      >
+        {body}
+      </WizardShell>
+      {state.step === 'done' && (
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className="fixed bottom-4 right-4 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 rounded text-sm border border-neutral-700"
+        >
+          Настройки
+        </button>
+      )}
+      {showSettings && <ControlPanel onClose={() => setShowSettings(false)} />}
+    </>
   )
 }
