@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-const envSchema = z.object({
+export const envSchema = z.object({
   // Core
   BETSY_MODE: z.string().optional(),
   BC_DATABASE_URL: z.string().min(1, 'BC_DATABASE_URL is required'),

@@ -1,35 +1,11 @@
-import { randomBytes } from 'node:crypto'
-
-export interface EnvParams {
-  presetId: string
-  publicUrl: string
-  port?: number
-  botToken?: string
-  engineVersion?: string
-}
-
-export interface GeneratedEnv {
-  env: Record<string, string>
-  asEnvFile: string
-  dbPassword: string
-  jwtSecret: string
-}
-
-export function generateEnv(params: EnvParams): GeneratedEnv {
-  const dbPassword = randomBytes(24).toString('hex')
-  const jwtSecret = randomBytes(48).toString('hex')
-  const env: Record<string, string> = {
-    BC_DB_PASSWORD: dbPassword,
-    BC_JWT_SECRET: jwtSecret,
-    BC_TG_BOT_TOKEN: params.botToken ?? '',
-    BC_PUBLIC_URL: params.publicUrl,
-    BC_PERSONA_PRESET_ID: params.presetId,
-    BC_PORT: String(params.port ?? 3777),
-    BC_ENGINE_VERSION: params.engineVersion ?? 'latest',
-  }
-  const asEnvFile =
-    Object.entries(env)
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n') + '\n'
-  return { env, asEnvFile, dbPassword, jwtSecret }
-}
+// Thin facade over the wizard-env contract. The source of truth for the
+// .env shape lives in ./wizard-env-contract.ts and is tested against the
+// engine's envSchema by tests/multi/server/wizard-env-smoke.test.ts.
+//
+// We re-export rather than re-implement so the wizard cannot drift from
+// what the engine accepts.
+export {
+  generateEnv,
+  type EnvParams,
+  type GeneratedEnv,
+} from './wizard-env-contract'

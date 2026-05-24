@@ -171,9 +171,10 @@ export class SshBootstrap extends EventEmitter {
   }
 
   async setBotWebhook(botToken: string, _publicUrl: string): Promise<void> {
-    // The engine will call setWebhook on startup if BC_TG_BOT_TOKEN is set.
-    // Here we just patch .env and restart.
-    const envUpdate = `sed -i 's|^BC_TG_BOT_TOKEN=.*|BC_TG_BOT_TOKEN=${botToken}|' /opt/betsy-multi/.env`
+    // The engine reads BC_TELEGRAM_BOT_TOKEN and calls setWebhook on startup.
+    // Here we just patch .env and restart. Commit B replaces this sed-based
+    // approach with an SFTP read/write to remove shell-injection risk.
+    const envUpdate = `sed -i 's|^BC_TELEGRAM_BOT_TOKEN=.*|BC_TELEGRAM_BOT_TOKEN=${botToken}|' /opt/betsy-multi/.env`
     await this.exec(envUpdate)
     const restart = await this.exec(`cd /opt/betsy-multi && docker compose restart betsy`)
     if (restart.code !== 0) throw new Error(`restart failed: ${restart.stderr}`)

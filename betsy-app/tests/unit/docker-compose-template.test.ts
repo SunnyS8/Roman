@@ -13,11 +13,15 @@ describe('generateEnv', () => {
 
   it('includes all required env keys', () => {
     const { env } = generateEnv({ presetId: 'betsy-pro', publicUrl: 'http://x:3777' })
-    expect(env.BC_PERSONA_PRESET_ID).toBe('betsy-pro')
-    expect(env.BC_PUBLIC_URL).toBe('http://x:3777')
+    expect(env.BC_DATABASE_URL).toContain('postgres://betsy:')
+    expect(env.BC_DATABASE_URL).toContain('@postgres:5432/betsy')
+    expect(env.BC_WEBHOOK_BASE_URL).toBe('http://x:3777')
     expect(env.BC_PORT).toBe('3777')
+    expect(env.BC_HTTP_PORT).toBe('3777')
+    expect(env.BC_HEALTHZ_PORT).toBe('3777')
     expect(env.BC_ENGINE_VERSION).toBe('latest')
-    expect(env.BC_TG_BOT_TOKEN).toBe('') // empty until bot step
+    expect(env.BC_TELEGRAM_BOT_TOKEN).toBe('') // empty until bot step
+    expect(env.GEMINI_API_KEY).toBe('') // empty until user provides
   })
 
   it('asEnvFile is valid .env format', () => {
@@ -27,16 +31,30 @@ describe('generateEnv', () => {
     expect(asEnvFile).not.toMatch(/^=$/m)
   })
 
-  it('respects optional port + botToken + engineVersion', () => {
+  it('respects optional port + botToken + geminiApiKey + engineVersion', () => {
     const { env } = generateEnv({
       presetId: 'p',
       publicUrl: 'http://x',
       port: 4000,
       botToken: '123:abc',
+      geminiApiKey: 'gem-key',
       engineVersion: 'v1.2.3',
     })
     expect(env.BC_PORT).toBe('4000')
-    expect(env.BC_TG_BOT_TOKEN).toBe('123:abc')
+    expect(env.BC_HTTP_PORT).toBe('4000')
+    expect(env.BC_HEALTHZ_PORT).toBe('4000')
+    expect(env.BC_TELEGRAM_BOT_TOKEN).toBe('123:abc')
+    expect(env.GEMINI_API_KEY).toBe('gem-key')
     expect(env.BC_ENGINE_VERSION).toBe('v1.2.3')
+  })
+
+  it('omits the dead BC_TG_BOT_TOKEN / BC_PERSONA_PRESET_ID / BC_PUBLIC_URL keys', () => {
+    // Regression guard: these used to be in the .env but the engine never
+    // read them (or read them under a different name). Keep them out so the
+    // wizard ships the same shape as the engine validates.
+    const { env } = generateEnv({ presetId: 'betsy-default', publicUrl: 'http://x' })
+    expect(env.BC_TG_BOT_TOKEN).toBeUndefined()
+    expect(env.BC_PERSONA_PRESET_ID).toBeUndefined()
+    expect(env.BC_PUBLIC_URL).toBeUndefined()
   })
 })
