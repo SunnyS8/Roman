@@ -35,6 +35,25 @@ describe('WizardEngine', () => {
     expect(s.step).toBe('hosted-login')
   })
 
+  it('hosted poll error surfaces message on hosted-login screen', () => {
+    let s = reduce(initialState(), { type: 'persona-selected', presetId: 'betsy-default' })
+    s = reduce(s, { type: 'mode-selected', mode: 'hosted' })
+    s = reduce(s, { type: 'hosted-nonce-received', nonce: 'n1', deepLink: 'x' })
+    s = reduce(s, { type: 'hosted-poll-error', message: 'server 500' })
+    expect(s.step).toBe('hosted-login')
+    expect(s.hostedError).toBe('server 500')
+  })
+
+  it('hostedError clears when a new login starts', () => {
+    let s = reduce(initialState(), { type: 'persona-selected', presetId: 'betsy-default' })
+    s = reduce(s, { type: 'mode-selected', mode: 'hosted' })
+    s = reduce(s, { type: 'hosted-nonce-received', nonce: 'n1', deepLink: 'x' })
+    s = reduce(s, { type: 'hosted-poll-error', message: 'oops' })
+    expect(s.hostedError).toBe('oops')
+    s = reduce(s, { type: 'hosted-nonce-received', nonce: 'n2', deepLink: 'y' })
+    expect(s.hostedError).toBeNull()
+  })
+
   it('selfhost path: ssh → install → bot-token → done', () => {
     let s = reduce(initialState(), { type: 'persona-selected', presetId: 'betsy-default' })
     s = reduce(s, { type: 'mode-selected', mode: 'selfhost' })

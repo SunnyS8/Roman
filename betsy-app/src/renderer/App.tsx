@@ -114,7 +114,7 @@ export function App(): JSX.Element {
       />
     )
   } else if (state.step === 'hosted-login' && preset) {
-    body = <HostedLogin preset={preset} />
+    body = <HostedLogin preset={preset} pollError={state.hostedError} />
   } else if (state.step === 'hosted-waiting' && preset) {
     body = <HostedWaiting preset={preset} deepLink={state.hostedDeepLink} />
   } else if (state.step === 'selfhost-ssh-form' && preset) {

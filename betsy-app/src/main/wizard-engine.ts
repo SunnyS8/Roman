@@ -24,6 +24,7 @@ export interface WizardState {
   installProgress: number // 0..100
   installLog: string[]
   installError: string | null
+  hostedError: string | null
   botToken: string | null
   botWebhookOk: boolean
 }
@@ -34,6 +35,7 @@ export type WizardEvent =
   | { type: 'hosted-nonce-received'; nonce: string; deepLink: string }
   | { type: 'hosted-poll-success'; jwt: string; workspaceId: string }
   | { type: 'hosted-poll-timeout' }
+  | { type: 'hosted-poll-error'; message: string }
   | {
       type: 'ssh-creds-submitted'
       host: string
@@ -41,7 +43,6 @@ export type WizardEvent =
       user: string
       authKind: 'password' | 'key'
     }
-  | { type: 'ssh-test-passed' }
   | { type: 'install-progress'; pct: number; logLine?: string }
   | { type: 'install-done' }
   | { type: 'install-failed'; error: string }
@@ -66,6 +67,7 @@ export function initialState(): WizardState {
     installProgress: 0,
     installLog: [],
     installError: null,
+    hostedError: null,
     botToken: null,
     botWebhookOk: false,
   }
@@ -83,10 +85,13 @@ export function reduce(state: WizardState, event: WizardEvent): WizardState {
         step: event.mode === 'hosted' ? 'hosted-login' : 'selfhost-ssh-form',
       }
     case 'hosted-nonce-received':
+      // Fresh login attempt — clear any prior poll error so the user isn't
+      // looking at a stale message while waiting for the new flow.
       return {
         ...state,
         hostedNonce: event.nonce,
         hostedDeepLink: event.deepLink,
+        hostedError: null,
         step: 'hosted-waiting',
       }
     case 'hosted-poll-success':
@@ -98,6 +103,8 @@ export function reduce(state: WizardState, event: WizardEvent): WizardState {
       }
     case 'hosted-poll-timeout':
       return { ...state, step: 'hosted-login' }
+    case 'hosted-poll-error':
+      return { ...state, step: 'hosted-login', hostedError: event.message }
     case 'ssh-creds-submitted':
       return {
         ...state,
@@ -107,8 +114,6 @@ export function reduce(state: WizardState, event: WizardEvent): WizardState {
         sshAuthKind: event.authKind,
         step: 'selfhost-install',
       }
-    case 'ssh-test-passed':
-      return state
     case 'install-progress':
       return {
         ...state,

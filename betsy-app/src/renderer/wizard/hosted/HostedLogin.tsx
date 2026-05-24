@@ -4,9 +4,10 @@ import type { CachedPreset } from '../../../main/persona-cache'
 
 interface HostedLoginProps {
   preset: CachedPreset
+  pollError?: string | null
 }
 
-export function HostedLogin({ preset }: HostedLoginProps): JSX.Element {
+export function HostedLogin({ preset, pollError }: HostedLoginProps): JSX.Element {
   const lines = preset.wizardLines as Record<string, string | string[]>
   const intro = typeof lines.tg_login_intro === 'string' ? lines.tg_login_intro : ''
   const [busy, setBusy] = useState(false)
@@ -28,6 +29,11 @@ export function HostedLogin({ preset }: HostedLoginProps): JSX.Element {
   return (
     <div>
       {intro && <p className="text-blue-300 italic mb-6">«{intro}»</p>}
+      {pollError && (
+        <div className="text-red-400 text-sm mb-3 p-3 bg-red-950/40 rounded border border-red-900">
+          Прошлый вход не удался: {pollError}. Попробуй снова.
+        </div>
+      )}
       <button
         onClick={() => void click()}
         disabled={busy}

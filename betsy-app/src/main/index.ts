@@ -89,7 +89,12 @@ async function runPollLoop(nonce: string): Promise<void> {
       }
       if (r.kind === 'error') {
         log('warn', 'hosted-poll-error', { status: r.status })
-        break
+        dispatchInternal({
+          type: 'hosted-poll-error',
+          message: `Сервер вернул ошибку при опросе (status ${r.status})`,
+        })
+        activePollNonce = null
+        return
       }
     } catch (e) {
       log('warn', 'hosted-poll-throw', { err: String(e) })
