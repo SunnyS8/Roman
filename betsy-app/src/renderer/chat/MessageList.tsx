@@ -1,4 +1,4 @@
-import { useEffect, useRef, type UIEvent } from 'react'
+import { useLayoutEffect, useRef, type UIEvent } from 'react'
 import type { Message } from '../../shared/chat-protocol'
 
 interface Props {
@@ -15,19 +15,35 @@ function channelTag(channel: Message['channel']): string {
 
 export function MessageList({ messages, streaming, onScrollTop }: Props): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null)
+  // First time history actually lands we force-scroll to the bottom (latest
+  // message). After that, follow the "stick to bottom only if user is already
+  // near the bottom" rule so manual scrolling up to read older context isn't
+  // yanked back down by new arrivals.
+  const didInitialScrollRef = useRef(false)
 
-  // Auto-scroll to bottom on new message — but only if user was already near
-  // the bottom. Otherwise the user is reading older history and we shouldn't
-  // yank them out of it.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = containerRef.current
     if (!el) return
+    if (!didInitialScrollRef.current && messages.length > 0) {
+      el.scrollTop = el.scrollHeight
+      didInitialScrollRef.current = true
+      return
+    }
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100
     if (nearBottom) el.scrollTop = el.scrollHeight
   }, [messages, streaming])
 
   function onScroll(e: UIEvent<HTMLDivElement>): void {
-    if (e.currentTarget.scrollTop < 50 && onScrollTop) onScrollTop()
+    // Suppress the lazy-load-older trigger until we've performed the initial
+    // scroll-to-bottom — otherwise the synthetic scroll event during paint
+    // (when scrollTop briefly is 0) would fire onScrollTop spuriously.
+    if (
+      didInitialScrollRef.current &&
+      e.currentTarget.scrollTop < 50 &&
+      onScrollTop
+    ) {
+      onScrollTop()
+    }
   }
 
   return (

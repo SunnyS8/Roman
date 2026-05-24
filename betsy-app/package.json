@@ -1,6 +1,6 @@
 {
   "name": "betsy-app",
-  "version": "0.2.0-rc3",
+  "version": "0.2.0-rc4",
   "private": true,
   "main": "dist/main/index.js",
   "scripts": {
