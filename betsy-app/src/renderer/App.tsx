@@ -9,6 +9,7 @@ import { InstallProgress } from './wizard/selfhost/InstallProgress'
 import { BotTokenForm } from './wizard/selfhost/BotTokenForm'
 import { ChatWindow } from './chat/ChatWindow'
 import { ControlPanel } from './control-panel/ControlPanel'
+import { UpdateBanner } from './UpdateBanner'
 import { WizardShell } from './wizard/WizardShell'
 import type { WizardState } from '../main/wizard-engine'
 import type { CachedPreset } from '../main/persona-cache'
@@ -100,17 +101,20 @@ export function App(): JSX.Element {
       await dispatch({ type: 'reset' })
     }
     return (
-      <>
-        <ChatWindow
-          personaName={preset?.name ?? 'Бетси'}
-          avatarUrl={preset ? avatars[preset.id] ?? null : null}
-          onReauth={() => {
-            void handleReauth()
-          }}
-          onSettings={() => setShowSettings(true)}
-        />
+      <div className="h-screen flex flex-col">
+        <UpdateBanner />
+        <div className="flex-1 min-h-0">
+          <ChatWindow
+            personaName={preset?.name ?? 'Бетси'}
+            avatarUrl={preset ? avatars[preset.id] ?? null : null}
+            onReauth={() => {
+              void handleReauth()
+            }}
+            onSettings={() => setShowSettings(true)}
+          />
+        </div>
         {showSettings && <ControlPanel onClose={() => setShowSettings(false)} />}
-      </>
+      </div>
     )
   }
 
@@ -171,15 +175,18 @@ export function App(): JSX.Element {
   }
 
   return (
-    <>
-      <WizardShell
-        state={state}
-        avatarPath={preset ? avatars[preset.id] ?? null : null}
-        headerLine={headerLine}
-      >
-        {body}
-      </WizardShell>
+    <div className="h-screen flex flex-col">
+      <UpdateBanner />
+      <div className="flex-1 min-h-0 overflow-auto">
+        <WizardShell
+          state={state}
+          avatarPath={preset ? avatars[preset.id] ?? null : null}
+          headerLine={headerLine}
+        >
+          {body}
+        </WizardShell>
+      </div>
       {showSettings && <ControlPanel onClose={() => setShowSettings(false)} />}
-    </>
+    </div>
   )
 }

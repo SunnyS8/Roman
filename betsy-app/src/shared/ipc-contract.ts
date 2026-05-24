@@ -51,7 +51,13 @@ export interface IpcContract {
    */
   'chat:start': () => Promise<void>
   'app:getInfo': () => Promise<AppInfo>
+  'updater:install-now': () => Promise<void>
+  'updater:check-now': () => Promise<{ ok: true; version: string | null } | { ok: false; error: string }>
   // Push events (main -> renderer), delivered via window.api.on(channel, cb):
-  //   'chat:event'      payload: ServerMessage from src/shared/chat-protocol
-  //   'chat:connection' payload: { status: 'connecting' | 'open' | 'reconnecting' | 'auth-failed' }
+  //   'chat:event'              payload: ServerMessage from src/shared/chat-protocol
+  //   'chat:connection'         payload: { status: 'connecting' | 'open' | 'reconnecting' | 'auth-failed' }
+  //   'updater:available'       payload: { version: string }
+  //   'updater:download-progress' payload: { percent: number; bytesPerSecond: number }
+  //   'updater:downloaded'      payload: { version: string }
+  //   'updater:error'           payload: { message: string }
 }

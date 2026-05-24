@@ -10,6 +10,7 @@ import { SshBootstrap } from './ssh-bootstrap'
 import { SecureStorage } from './secure-storage'
 import { BackendConnector } from './backend-connector'
 import { ChatHistoryClient } from './chat-history-client'
+import { setupAutoUpdate } from './updater'
 import type { ClientMessage, ServerMessage } from '../shared/chat-protocol'
 
 const isDev = !!process.env.VITE_DEV_SERVER_URL
@@ -327,6 +328,11 @@ void app.whenReady().then(async () => {
   })
 
   createWindow()
+
+  // Auto-update: in packaged builds polls updates.betsyai.io every 4h,
+  // downloads block-level diffs, pushes 'updater:downloaded' to renderer.
+  // No-op in dev.
+  if (mainWindow) setupAutoUpdate(mainWindow)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
