@@ -136,6 +136,57 @@ export class ConversationRepo {
     })
   }
 
+  /**
+   * Page through history backwards. `beforeId` = exclusive upper-bound cursor
+   * (the message with that id is NOT in the result). Pass `null` to get the
+   * latest `limit` messages.
+   *
+   * Returns rows newest-first within the page so the caller can append to
+   * a top-of-list "older messages" section in order.
+   *
+   * If `beforeId` is unknown the result is empty — the client probably has
+   * stale state and should refresh via no-cursor.
+   *
+   * P1.5: backs the GET /chat/history endpoint for the desktop chat channel.
+   */
+  async listBefore(
+    workspaceId: string,
+    beforeId: string | null,
+    limit: number,
+  ): Promise<Conversation[]> {
+    return withWorkspace(this.pool, workspaceId, async (client) => {
+      if (beforeId === null) {
+        const { rows } = await client.query(
+          `select * from bc_conversation
+           where workspace_id = $1
+           order by created_at desc
+           limit $2`,
+          [workspaceId, limit],
+        )
+        return rows.map(rowToConversation)
+      }
+
+      // Look up the cursor row's created_at first. If the cursor is unknown
+      // we can't compute a position, so we return an empty page.
+      const cursor = await client.query(
+        `select created_at from bc_conversation
+         where workspace_id = $1 and id = $2`,
+        [workspaceId, beforeId],
+      )
+      if (cursor.rows.length === 0) return []
+      const beforeCreatedAt: Date = cursor.rows[0].created_at
+
+      const { rows } = await client.query(
+        `select * from bc_conversation
+         where workspace_id = $1 and created_at < $2
+         order by created_at desc
+         limit $3`,
+        [workspaceId, beforeCreatedAt, limit],
+      )
+      return rows.map(rowToConversation)
+    })
+  }
+
   async recent(workspaceId: string, limit: number): Promise<Conversation[]> {
     return withWorkspace(this.pool, workspaceId, async (client) => {
       // Skip messages that have been summarized into a long-term summary fact

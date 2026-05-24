@@ -114,4 +114,51 @@ d('ConversationRepo', () => {
     const recent = await repo.recent(workspaceId, 1)
     expect(recent[0].externalMessageId).toBe(555)
   })
+
+  describe('listBefore', () => {
+    it('lists messages strictly before a given id, newest-first, limit honored', async () => {
+      const inserted: string[] = []
+      for (let i = 0; i < 5; i++) {
+        const c = await repo.append(workspaceId, {
+          role: 'user',
+          content: `msg-${i}`,
+          channel: 'desktop',
+        })
+        inserted.push(c.id)
+        // ensure created_at ordering is unambiguous on fast Postgres
+        await new Promise((r) => setTimeout(r, 5))
+      }
+      const result = await repo.listBefore(workspaceId, inserted[3], 10)
+      expect(result.map((r) => r.content)).toEqual(['msg-2', 'msg-1', 'msg-0'])
+    })
+
+    it('with no cursor returns latest N newest-first', async () => {
+      for (let i = 0; i < 3; i++) {
+        await repo.append(workspaceId, { role: 'user', content: `x-${i}`, channel: 'desktop' })
+        await new Promise((r) => setTimeout(r, 5))
+      }
+      const result = await repo.listBefore(workspaceId, null, 10)
+      expect(result.map((r) => r.content)).toEqual(['x-2', 'x-1', 'x-0'])
+    })
+
+    it('respects limit', async () => {
+      for (let i = 0; i < 10; i++) {
+        await repo.append(workspaceId, { role: 'user', content: `y-${i}`, channel: 'desktop' })
+        await new Promise((r) => setTimeout(r, 5))
+      }
+      const result = await repo.listBefore(workspaceId, null, 3)
+      expect(result).toHaveLength(3)
+      expect(result[0].content).toBe('y-9')
+    })
+
+    it('with unknown cursor returns empty', async () => {
+      await repo.append(workspaceId, { role: 'user', content: 'a', channel: 'desktop' })
+      const result = await repo.listBefore(
+        workspaceId,
+        '00000000-0000-0000-0000-deadbeef0000',
+        10,
+      )
+      expect(result).toEqual([])
+    })
+  })
 })
