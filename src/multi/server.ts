@@ -49,6 +49,8 @@ import { createGeminiSkillGeneratorLLM } from './learner/skill-generator.js'
 import { Coach } from './coach/coach.js'
 import { createGeminiCoachLLM } from './coach/analyzer.js'
 import { registerCronWiring, createAdminCronHandler, type CronRunners } from './cron-wiring.js'
+// P1.A — public preset catalog endpoint (no auth) consumed by Windows-app wizard.
+import { createCatalogPersonasHandler } from './personas/catalog-handler.js'
 
 export async function startMultiServer(): Promise<void> {
   let env
@@ -332,9 +334,11 @@ export async function startMultiServer(): Promise<void> {
     secret: process.env.BC_ADMIN_SECRET,
     logger,
   })
+  const catalogPersonasHandler = createCatalogPersonasHandler()
   const healthzServer = startHealthzServer(env.BC_HEALTHZ_PORT, pool, [
     { method: 'POST', path: '/oauth/token', handler: relayHandler },
     { method: 'POST', path: '/admin/cron/run', handler: adminCronHandler },
+    { method: 'GET', path: '/catalog/personas', handler: catalogPersonasHandler },
   ])
   logger.info('healthz server listening', { port: env.BC_HEALTHZ_PORT })
 

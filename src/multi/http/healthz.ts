@@ -44,7 +44,10 @@ export function startHealthzServer(
       return
     }
     for (const route of extraRoutes) {
-      if (req.method === route.method && req.url === route.path) {
+      // Match on method + pathname only (strip query string). This lets
+      // handlers like /auth/tg-link/poll?nonce=... still match /auth/tg-link/poll.
+      const pathname = (req.url ?? '').split('?')[0]
+      if (req.method === route.method && pathname === route.path) {
         try {
           await route.handler(req, res)
         } catch (e) {
