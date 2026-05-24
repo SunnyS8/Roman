@@ -7,7 +7,7 @@ import { HostedWaiting } from './wizard/hosted/HostedWaiting'
 import { SshForm } from './wizard/selfhost/SshForm'
 import { InstallProgress } from './wizard/selfhost/InstallProgress'
 import { BotTokenForm } from './wizard/selfhost/BotTokenForm'
-import { DeferredChatPlaceholder } from './chat/DeferredChatPlaceholder'
+import { ChatWindow } from './chat/ChatWindow'
 import { ControlPanel } from './control-panel/ControlPanel'
 import { WizardShell } from './wizard/WizardShell'
 import type { WizardState } from '../main/wizard-engine'
@@ -92,6 +92,34 @@ export function App(): JSX.Element {
     setState(next)
   }
 
+  // Once the wizard reaches `done` we leave the WizardShell entirely and
+  // hand over the whole window to the chat UI. The Settings button is still
+  // available as a fixed-position overlay.
+  if (state.step === 'done') {
+    const handleReauth = async (): Promise<void> => {
+      await dispatch({ type: 'reset' })
+    }
+    return (
+      <>
+        <ChatWindow
+          personaName={preset?.name ?? 'Бетси'}
+          avatarUrl={preset ? avatars[preset.id] ?? null : null}
+          onReauth={() => {
+            void handleReauth()
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          className="fixed bottom-4 right-4 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 rounded text-sm border border-neutral-700"
+        >
+          Настройки
+        </button>
+        {showSettings && <ControlPanel onClose={() => setShowSettings(false)} />}
+      </>
+    )
+  }
+
   let body: JSX.Element
 
   if (state.step === 'persona-picker') {
@@ -139,8 +167,6 @@ export function App(): JSX.Element {
     body = <InstallProgress preset={preset} state={state} />
   } else if (state.step === 'selfhost-bot-token' && preset) {
     body = <BotTokenForm preset={preset} />
-  } else if (state.step === 'done') {
-    body = <DeferredChatPlaceholder />
   } else {
     body = (
       <div>
@@ -159,15 +185,6 @@ export function App(): JSX.Element {
       >
         {body}
       </WizardShell>
-      {state.step === 'done' && (
-        <button
-          type="button"
-          onClick={() => setShowSettings(true)}
-          className="fixed bottom-4 right-4 px-3 py-2 bg-neutral-800 hover:bg-neutral-700 rounded text-sm border border-neutral-700"
-        >
-          Настройки
-        </button>
-      )}
       {showSettings && <ControlPanel onClose={() => setShowSettings(false)} />}
     </>
   )
