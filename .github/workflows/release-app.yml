@@ -49,15 +49,31 @@ jobs:
         shell: bash
         run: npm version "${{ steps.ver.outputs.version }}" --no-git-tag-version --allow-same-version
 
-      - name: Build + sign + publish (electron-builder)
+      - name: Detect signing config
+        id: sign
+        shell: bash
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          if [ -n "$WIN_CSC_LINK" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Code-signing cert detected — installer will be signed."
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::WIN_CSC_LINK secret is empty — installer will ship UNSIGNED. Users will see Windows SmartScreen warning on first install. Procure a Microsoft Trusted Signing subscription (~\$120/yr) or EV cert and add WIN_CSC_LINK + WIN_CSC_KEY_PASSWORD secrets to enable signing."
+          fi
+
+      - name: Build electron-builder (we publish ourselves below)
         working-directory: betsy-app
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Empty WIN_CSC_LINK means electron-builder ships unsigned — fine
-          # until EV cert is procured. Once present, electron-builder will sign.
+          # until cert is procured. Once present, electron-builder will sign.
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-        run: npm run build && npx electron-builder --win --x64 --publish always
+        # --publish never — electron-builder's "generic" provider is read-only
+        # (used by electron-updater clients to fetch). We upload to R2 via aws
+        # s3 cp in the next step.
+        run: npm run build && npx electron-builder --win --x64 --publish never
 
       - name: List release artifacts
         working-directory: betsy-app
@@ -143,3 +159,8 @@ jobs:
           echo "- Version: ${{ steps.ver.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Installer: https://updates.betsyai.io/electron/win-x64/Betsy-Setup-latest.exe" >> "$GITHUB_STEP_SUMMARY"
           echo "- Update manifest: https://updates.betsyai.io/electron/win-x64/latest.yml" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.sign.outputs.signed }}" = "true" ]; then
+            echo "- Signing: ✅ signed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Signing: ⚠️ UNSIGNED — users will see SmartScreen warning. See [docs/download-page-copy.md](https://github.com/Aimagine-life/Betsy/blob/main/docs/download-page-copy.md) for user-facing instructions." >> "$GITHUB_STEP_SUMMARY"
+          fi
