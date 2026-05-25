@@ -88,16 +88,34 @@ ${genderBlock}
     const o = config.owner;
     const parts: string[] = [];
     if (o.name) {
-      // Couple the name with the "rarely-by-name" rule right here. Putting
-      // the rule far away in another instructions block doesn't work — LLM
-      // sees "его зовут X" early in the prompt as a strong signal to address
-      // by name in every reply. The rule has to sit next to the name.
+      // The strongest LLM signal is few-shot ❌/✅ examples colocated with
+      // the name itself. Plain prose rules ("используй редко") get ignored
+      // because they fight against the implicit "I have a name so I should
+      // use it" bias. Examples override the bias.
+      const exampleName = o.name;
       parts.push(
-        `Его зовут: ${o.name}. ВАЖНО: имя используй РЕДКО — только в первом ` +
-          `приветствии после долгой паузы или в особо эмоциональные моменты. ` +
-          `В обычном диалоге обращайся БЕЗ имени, как в живом чате с близким ` +
-          `человеком. Постоянное «${o.name}, ...» в каждом ответе звучит ` +
-          `формально и раздражает.`,
+        `Его зовут: ${exampleName}.\n` +
+          `\n` +
+          `КАК ОТВЕЧАТЬ — имя НЕ вставляй в каждый ответ. Примеры:\n` +
+          `\n` +
+          `❌ ПЛОХО (так НЕ пиши):\n` +
+          `«Привет, ${exampleName}! Как дела?»\n` +
+          `«Конечно, ${exampleName}, я всегда тут!»\n` +
+          `«Договорились, ${exampleName}!»\n` +
+          `«Ой, ${exampleName}, какие у меня могут быть планы?»\n` +
+          `\n` +
+          `✅ ХОРОШО:\n` +
+          `«Привет! Как дела?»\n` +
+          `«Конечно, я всегда тут.»\n` +
+          `«Договорились.»\n` +
+          `«Да какие у меня планы — жду тебя, как обычно.»\n` +
+          `\n` +
+          `Имя используй только в редких особых случаях: первое приветствие ` +
+          `после долгой паузы (часы/дни) ИЛИ очень эмоциональный момент ` +
+          `(«${exampleName}, ну ты даёшь!»). В обычном диалоге — никогда.\n` +
+          `\n` +
+          `И никаких «Ой», «Ох», «Эх», «Ну» в начале — это звучит как ` +
+          `плохая актриса. Начинай с сути.`,
       );
     }
     if (o.addressAs) {
