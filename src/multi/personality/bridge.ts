@@ -1,85 +1,6 @@
 import { buildSystemPrompt, type PromptConfig } from '../../core/prompt.js'
 import type { Persona } from '../personas/types.js'
 
-/**
- * Rewrite owner facts so they don't start with the owner's name.
- *
- * Many facts get extracted in the form "Костя любит ВДНХ" / "У Кости есть
- * машина" / "Костя интересуется тюнингом". When ~15 such facts get injected
- * as bullet points into the system prompt every turn, the model treats the
- * name as the canonical address form and replicates "Костя, ..." in every
- * reply.
- *
- * We strip the name (and common short forms) from the start of each fact.
- * Mid-sentence mentions are kept — the goal is to remove the
- * heavy-handed positional priming, not to scrub the name from memory entirely.
- */
-export function sanitizeOwnerFacts(facts: string[], ownerName: string | null | undefined): string[] {
-  if (!ownerName) return facts
-  const forms = expandNameForms(ownerName)
-  if (forms.length === 0) return facts
-  return facts
-    .map((f) => stripLeadingNameFromFact(f, forms))
-    .filter((f) => f.trim().length > 0)
-}
-
-function stripLeadingNameFromFact(fact: string, forms: string[]): string {
-  let out = fact.trim()
-  for (const name of forms) {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    // "Костя любит X" → "любит X"
-    // "У Кости есть Y" → "есть Y"
-    // "Костя, 39 лет, …" → "39 лет, …"
-    const patterns: Array<{ re: RegExp; restore: (m: RegExpMatchArray) => string }> = [
-      // "Костя любит X" → keep first letter ("любит") as start
-      { re: new RegExp(`^${escaped}\\s+([а-я])`, 'iu'), restore: (m) => m[1] },
-      // "Костя, 39 лет" → "39 лет"
-      { re: new RegExp(`^${escaped}[,:]\\s+`, 'iu'), restore: () => '' },
-      // "У Кости есть машина" → "есть машина" (keep verb + space)
-      { re: new RegExp(`^У\\s+${shortGenitive(escaped)}\\s+(есть|нет|был[аио]?)\\s+`, 'iu'), restore: (m) => `${m[1]} ` },
-      // "С Костей X" → "X" (drop "С Костей ")
-      { re: new RegExp(`^С\\s+${shortInstrumental(escaped)}\\s+`, 'iu'), restore: () => '' },
-    ]
-    for (const { re, restore } of patterns) {
-      const m = out.match(re)
-      if (!m) continue
-      out = restore(m) + out.slice(m[0].length)
-      break
-    }
-  }
-  // Capitalize first letter so the rewritten fact reads as a complete clause.
-  if (out.length > 0) out = out[0].toLocaleUpperCase('ru') + out.slice(1)
-  return out
-}
-
-function expandNameForms(name: string): string[] {
-  const base = name.trim()
-  if (!base) return []
-  const forms = new Set<string>([base])
-  const known: Record<string, string[]> = {
-    'константин': ['Костя', 'Костик', 'Кости', 'Косте', 'Костю', 'Костей'],
-    'александр': ['Саша', 'Шура', 'Саня', 'Саши', 'Шуры', 'Сане'],
-    'дмитрий': ['Дима', 'Митя', 'Димы', 'Мити', 'Диме', 'Мите'],
-    'михаил': ['Миша', 'Мишаня', 'Миши', 'Мише'],
-    'екатерина': ['Катя', 'Кати', 'Кате', 'Катю'],
-    'мария': ['Маша', 'Маши', 'Маше', 'Машу'],
-    'сергей': ['Серёжа', 'Сергея', 'Сергею'],
-    'татьяна': ['Таня', 'Тани', 'Тане', 'Таню'],
-    'елена': ['Лена', 'Лены', 'Лене', 'Лену'],
-  }
-  for (const f of known[base.toLowerCase()] ?? []) forms.add(f)
-  return Array.from(forms)
-}
-
-// Best-effort short-form genitive ("Кости" from "Костя") for "У ... есть" pattern.
-// We just use the form as-is; caller passes the full known table via expandNameForms.
-function shortGenitive(escaped: string): string {
-  return escaped
-}
-function shortInstrumental(escaped: string): string {
-  return escaped
-}
-
 export interface BuildPromptInput {
   persona: Persona
   userDisplayName: string | null
@@ -93,10 +14,10 @@ export interface BuildPromptInput {
 /**
  * Build a system prompt for a Personal Betsy workspace.
  *
- * This function delegates to `src/core/prompt.ts#buildSystemPrompt`
- * — the same prompt builder used by single-mode Betsy. That guarantees
- * Personal Betsy has the exact same vibe, gender handling, tone, and
- * personality as the original single-mode Betsy.
+ * Delegates to `src/core/prompt.ts#buildSystemPrompt` (the same prompt
+ * builder single-mode Betsy uses) and tail-appends a few multi-mode
+ * instructions. This file is intentionally thin — the real prompt is in
+ * core/prompt.ts and the appended blocks below.
  */
 export function buildSystemPromptForPersona(input: BuildPromptInput): string {
   const { persona, userDisplayName, addressForm, ownerFacts, personalitySliders } = input
@@ -114,15 +35,11 @@ export function buildSystemPromptForPersona(input: BuildPromptInput): string {
     owner: {
       name: userDisplayName ?? undefined,
       addressAs: addressForm === 'ty' ? 'на ты' : 'на вы',
-      facts: sanitizeOwnerFacts(ownerFacts, userDisplayName),
+      facts: ownerFacts,
     },
   }
 
   const base = buildSystemPrompt(config)
-  // ADDRESS_INSTRUCTIONS was removed — it duplicated rules now expressed
-  // succinctly inside the owner block of core/prompt.ts AND it contained the
-  // user's literal name in its own examples, acting as positive few-shot for
-  // the very behaviour it tried to forbid. See 2026-05-25 investigation.
   return `${base}\n\n${ANTI_CLICHE_INSTRUCTIONS}\n\n${FORMATTING_INSTRUCTIONS}\n\n${WEB_SEARCH_INSTRUCTIONS}\n\n${SELFIE_INSTRUCTIONS}\n\n${RECALL_INSTRUCTIONS}`
 }
 
@@ -201,14 +118,6 @@ const WEB_SEARCH_INSTRUCTIONS = `## Поиск в интернете и ссыл
 После поиска передавай ссылки из поля \`sources\` в формате [название](url) — они кликабельны.
 
 ВАЖНО ПРО URL: бери поле \`uri\` из source КАК ЕСТЬ, целиком, ничего не обрезай и не "причёсывай". Не превращай длинный URL вида \`https://shop.example.com/product/12345?variant=red\` в короткий \`https://shop.example.com\` — это полностью теряет ссылку на товар. Юзер должен попасть НА КОНКРЕТНУЮ страницу из поиска, а не на главную сайта. Уродливые длинные URL — это нормально, копируй их как есть.`
-
-// ADDRESS_INSTRUCTIONS removed 2026-05-25. The block sabotaged itself by
-// quoting "Костя"/"Константин" 3 times as "bad" examples — Gemini 2.5 Flash
-// imitates the surface form of literal names near greeting positions
-// regardless of the negative framing. The same rule lives in the owner
-// block of core/prompt.ts in a name-free form, and historical assistant
-// turns are scrubbed by sanitizeNameOpenersFromHistory before being
-// replayed to the model.
 
 const FORMATTING_INSTRUCTIONS = `## Форматирование ответов
 

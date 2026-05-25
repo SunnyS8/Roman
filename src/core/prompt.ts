@@ -87,19 +87,11 @@ ${genderBlock}
   if (config.owner) {
     const o = config.owner;
     const parts: string[] = [];
-    // 2026-05-25 radical fix: the owner name is intentionally NOT injected
-    // into the system prompt. Every prior approach (plain "Его зовут X",
-    // few-shot examples, prose rules) ended up making the model address
-    // the user by name in every reply. With Gemini 2.5 Flash the presence
-    // of the name anywhere in the system context overpowers any rule
-    // telling it not to use the name. The only signal that reliably stops
-    // it is removing the name from the context entirely. If the model ever
-    // needs the name (e.g. user asks "как меня зовут?"), it will see it in
-    // the conversation history or learn from the user's introduction.
-    // Mirror sanitizer (postprocessAssistantText) strips any name-greeting
-    // patterns the model still emits, as a last line of defense.
+    if (o.name) {
+      parts.push(`Его зовут: ${o.name}`);
+    }
     if (o.addressAs) {
-      parts.push(`Обращайся к нему ${o.addressAs}, без имени и без обращений вроде «дружище», «братан».`);
+      parts.push(`Обращайся к нему: ${o.addressAs}`);
     }
     if (o.facts && o.facts.length > 0) {
       parts.push("Что ты о нём знаешь:");

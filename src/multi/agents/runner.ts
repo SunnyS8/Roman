@@ -325,142 +325,6 @@ function sanitizeHistoryForVision(
   })
 }
 
-/**
- * Strip the owner's name from greeting positions in past assistant turns.
- *
- * Why: past assistant turns are replayed verbatim into Gemini's `contents[]`
- * array. With 100+ historic turns of "Костя, ..." in the rolling window, the
- * model behaviour-clones the pattern in its next reply regardless of any
- * system-prompt rule. We rewrite the offending openers to a name-free form
- * so the in-context demonstration disappears.
- *
- * Conservative: we only strip the name when it sits in a clear greeting
- * position — start of message, optionally preceded by a polite opener like
- * "Привет"/"Конечно"/"Договорились", followed by a comma or "!". Mid-sentence
- * occurrences ("я говорил Косте что...") are NOT touched.
- *
- * Built per-call (not a const regex) because the owner's name is dynamic.
- */
-function buildNameOpenerRegex(name: string): RegExp | null {
-  if (!name || name.trim().length < 2) return null
-  const escaped = name.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  // Match: optional opener-word (Привет/Конечно/Ой/...) then NAME then
-  // greeting punctuation. Punctuation can be followed by whitespace OR end
-  // of string ("Договорились, Костя!").
-  // Mid-sentence mentions like "я говорил Косте что..." are NOT touched
-  // because they have no preceding opener-word AND no trailing greeting
-  // punctuation — the regex requires both context cues.
-  return new RegExp(
-    `^(\\s*(?:[«"']?(?:Привет|Хей|Хай|Конечно|Договорились|Да|Окей|Ок|Хорошо|Ладно|Слушай|Эй|Лови|Ой|Ох|Эх|Ну|Понял|Поняла|Поняла!|Готово|Понятно)[!,]?\\s+)?)${escaped}([,!:.](?:\\s+|$)|\\s+—\\s+)`,
-    'iu',
-  )
-}
-
-function stripNameOpener(content: string, nameForms: string[]): string {
-  let out = content
-  for (const name of nameForms) {
-    const re = buildNameOpenerRegex(name)
-    if (!re) continue
-    // Drop the name token + its punctuation; keep any preceding opener and the rest.
-    out = out.replace(re, (_m, opener) => {
-      const trimmed = (opener ?? '').trimEnd()
-      if (!trimmed) return ''
-      // "Конечно, Костя, всегда тут" → "Конечно, всегда тут"
-      return trimmed.endsWith(',') || trimmed.endsWith('!') ? `${trimmed} ` : `${trimmed}, `
-    })
-    // Trim trailing whitespace left behind when the replacement landed at
-    // end of message ("Договорились, Костя!" → "Договорились, ").
-    out = out.replace(/[ \t]+$/, '')
-  }
-  return out
-}
-
-/**
- * Common short-form derivations for Russian first names.
- * "Константин" → ["Константин", "Костя", "Костик"]; conservative — only adds
- * the canonical short form when we recognise the long one. For unknown
- * names returns just the input.
- */
-function nameShortForms(canonical: string): string[] {
-  const base = canonical.trim()
-  if (!base) return []
-  const forms = new Set<string>([base])
-  const lower = base.toLowerCase()
-  // Hard-coded small table for now — covers the most common cases.
-  const known: Record<string, string[]> = {
-    'константин': ['Костя', 'Костик'],
-    'александр': ['Саша', 'Шура', 'Саня'],
-    'дмитрий': ['Дима', 'Митя'],
-    'михаил': ['Миша', 'Мишаня'],
-    'екатерина': ['Катя', 'Катюша'],
-    'мария': ['Маша', 'Маня'],
-    'елена': ['Лена', 'Лёна'],
-    'сергей': ['Серёжа', 'Серый'],
-    'андрей': ['Андрюша', 'Дрю'],
-    'николай': ['Коля', 'Николаша'],
-    'татьяна': ['Таня', 'Танюша'],
-    'анастасия': ['Настя', 'Стася'],
-    'ольга': ['Оля', 'Олька'],
-  }
-  for (const f of known[lower] ?? []) forms.add(f)
-  return Array.from(forms)
-}
-
-/**
- * Sanitize a single outgoing assistant text — last line of defense.
- * Applied right before persistence + send so the model can't slip
- * banned patterns past us even when system-prompt rules fail. Order
- * of operations: strip interjections first (Ой/Ох/...) then strip
- * name-greeting openers (so "Ой, Костя!" → "Костя!" → "" works).
- *
- * Both bans live in the system prompt (ANTI_CLICHE_INSTRUCTIONS + the
- * owner block) but Gemini 2.5 Flash ignores prose rules in both cases,
- * so we sanitize on the way out. The cleaned text is what lands in
- * bc_conversation, so next turn's history is also clean — no reseed.
- */
-export function postprocessAssistantText(
-  text: string,
-  ownerName: string | null | undefined,
-): string {
-  if (!text) return text
-  let out = text
-  out = stripLeadingInterjection(out)
-  if (ownerName) {
-    const forms = nameShortForms(ownerName)
-    if (forms.length > 0) out = stripNameOpener(out, forms)
-  }
-  // Sometimes stripping the interjection leaves a leading comma/space
-  // ("Ой, привет!" → ", привет!"). Tidy.
-  out = out.replace(/^[\s,;:.!?-]+/, '')
-  if (out.length > 0) out = out[0].toLocaleUpperCase('ru') + out.slice(1)
-  return out
-}
-
-/**
- * Drop a leading interjection like "Ой,", "Ох!", "Ну ", "Эх — " before
- * the actual content. Case-insensitive. Conservative: only matches a
- * single-word interjection at the very start with greeting punctuation.
- */
-function stripLeadingInterjection(text: string): string {
-  return text.replace(
-    /^[«"']?(?:Ой|Ох|Ай|Ну|Эх|Ага|Угу|Хм|Эм|М-м|Эээ)[!,.\s—-]+/iu,
-    '',
-  )
-}
-
-export function sanitizeNameOpenersFromHistory(
-  history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }>,
-  ownerName: string | null | undefined,
-): Array<{ role: 'user' | 'assistant' | 'tool'; content: string }> {
-  if (!ownerName) return history
-  const forms = nameShortForms(ownerName)
-  if (forms.length === 0) return history
-  return history.map((turn) => {
-    if (turn.role !== 'assistant') return turn
-    const stripped = stripNameOpener(turn.content, forms)
-    return stripped === turn.content ? turn : { ...turn, content: stripped }
-  })
-}
 
 export interface BetsyResponse {
   text: string
@@ -592,11 +456,8 @@ async function runBetsyImpl(input: RunBetsyInput): Promise<BetsyResponse> {
 
   // FIX7: scrub vision-denial hallucinations from history when this turn
   // has attachments (so the model doesn't behaviour-clone "не могу видеть").
-  // 2026-05-25: also strip the owner-name from greeting positions of past
-  // assistant turns so Gemini doesn't behaviour-clone "Костя, ..." either.
-  const visionScrubbed =
+  const sanitizedHistory =
     inlineParts.length > 0 ? sanitizeHistoryForVision(context.history) : context.history
-  const sanitizedHistory = sanitizeNameOpenersFromHistory(visionScrubbed, workspace.displayName)
 
   let result: { text: string; toolCalls: unknown[]; tokensUsed: number }
   try {
@@ -656,9 +517,6 @@ async function runBetsyImpl(input: RunBetsyInput): Promise<BetsyResponse> {
       })
     }
   }
-
-  // Last line of defense — strip name-greeting openers before persistence.
-  finalText = postprocessAssistantText(finalText, workspace.displayName)
 
   // Store assistant reply
   let assistantRowId: string | undefined
@@ -955,11 +813,6 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
         })
       }
     }
-    // Last line of defense: strip name-greeting openers from the final
-    // text BEFORE persistence + before resolving the channel-side promise.
-    // This guarantees DB rows, fact-extractor, and outgoing send all see
-    // the cleaned version, so the next turn's in-context history is clean.
-    finalText = postprocessAssistantText(finalText, workspace.displayName)
     // Mutate result.text so downstream (append, extractor, return) see the
     // critic-applied final text.
     result.text = finalText

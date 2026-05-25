@@ -41,19 +41,15 @@ describe('buildSystemPromptForPersona (delegates to core)', () => {
     expect(out).toMatch(/женщина/i)
   })
 
-  it('includes address form but NOT the owner name (2026-05-25 radical fix)', () => {
-    // The owner name is intentionally NOT in the system prompt anymore —
-    // injecting it triggers "Костя, ..." behaviour in every reply regardless
-    // of any rule. Only the addressing form (на ты / на вы) is kept.
+  it('includes owner name and address form', () => {
     const out = buildSystemPromptForPersona({
       persona: basePersona,
       userDisplayName: 'Konstantin',
       addressForm: 'ty',
       ownerFacts: [],
     })
-    expect(out).not.toContain('Konstantin')
+    expect(out).toContain('Konstantin')
     expect(out).toMatch(/на ты/i)
-    expect(out).toMatch(/без имени/i)
   })
 
   it('includes owner facts in owner block', () => {
