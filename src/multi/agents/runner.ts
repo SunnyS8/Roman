@@ -406,6 +406,22 @@ function nameShortForms(canonical: string): string[] {
   return Array.from(forms)
 }
 
+/**
+ * Strip name-greeting openers from a single outgoing assistant text.
+ * Last line of defense — applied right before persistence + send so the
+ * model can't slip "Костя, ..." past us even if the system-prompt rule
+ * fails. Returns the cleaned text (or the original if no match).
+ */
+export function postprocessAssistantText(
+  text: string,
+  ownerName: string | null | undefined,
+): string {
+  if (!ownerName || !text) return text
+  const forms = nameShortForms(ownerName)
+  if (forms.length === 0) return text
+  return stripNameOpener(text, forms)
+}
+
 export function sanitizeNameOpenersFromHistory(
   history: Array<{ role: 'user' | 'assistant' | 'tool'; content: string }>,
   ownerName: string | null | undefined,
@@ -614,6 +630,9 @@ async function runBetsyImpl(input: RunBetsyInput): Promise<BetsyResponse> {
       })
     }
   }
+
+  // Last line of defense — strip name-greeting openers before persistence.
+  finalText = postprocessAssistantText(finalText, workspace.displayName)
 
   // Store assistant reply
   let assistantRowId: string | undefined
@@ -910,6 +929,11 @@ async function runBetsyStreamImpl(input: RunBetsyInput): Promise<RunBetsyStreamR
         })
       }
     }
+    // Last line of defense: strip name-greeting openers from the final
+    // text BEFORE persistence + before resolving the channel-side promise.
+    // This guarantees DB rows, fact-extractor, and outgoing send all see
+    // the cleaned version, so the next turn's in-context history is clean.
+    finalText = postprocessAssistantText(finalText, workspace.displayName)
     // Mutate result.text so downstream (append, extractor, return) see the
     // critic-applied final text.
     result.text = finalText
