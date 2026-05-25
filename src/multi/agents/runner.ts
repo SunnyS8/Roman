@@ -407,19 +407,45 @@ function nameShortForms(canonical: string): string[] {
 }
 
 /**
- * Strip name-greeting openers from a single outgoing assistant text.
- * Last line of defense — applied right before persistence + send so the
- * model can't slip "Костя, ..." past us even if the system-prompt rule
- * fails. Returns the cleaned text (or the original if no match).
+ * Sanitize a single outgoing assistant text — last line of defense.
+ * Applied right before persistence + send so the model can't slip
+ * banned patterns past us even when system-prompt rules fail. Order
+ * of operations: strip interjections first (Ой/Ох/...) then strip
+ * name-greeting openers (so "Ой, Костя!" → "Костя!" → "" works).
+ *
+ * Both bans live in the system prompt (ANTI_CLICHE_INSTRUCTIONS + the
+ * owner block) but Gemini 2.5 Flash ignores prose rules in both cases,
+ * so we sanitize on the way out. The cleaned text is what lands in
+ * bc_conversation, so next turn's history is also clean — no reseed.
  */
 export function postprocessAssistantText(
   text: string,
   ownerName: string | null | undefined,
 ): string {
-  if (!ownerName || !text) return text
-  const forms = nameShortForms(ownerName)
-  if (forms.length === 0) return text
-  return stripNameOpener(text, forms)
+  if (!text) return text
+  let out = text
+  out = stripLeadingInterjection(out)
+  if (ownerName) {
+    const forms = nameShortForms(ownerName)
+    if (forms.length > 0) out = stripNameOpener(out, forms)
+  }
+  // Sometimes stripping the interjection leaves a leading comma/space
+  // ("Ой, привет!" → ", привет!"). Tidy.
+  out = out.replace(/^[\s,;:.!?-]+/, '')
+  if (out.length > 0) out = out[0].toLocaleUpperCase('ru') + out.slice(1)
+  return out
+}
+
+/**
+ * Drop a leading interjection like "Ой,", "Ох!", "Ну ", "Эх — " before
+ * the actual content. Case-insensitive. Conservative: only matches a
+ * single-word interjection at the very start with greeting punctuation.
+ */
+function stripLeadingInterjection(text: string): string {
+  return text.replace(
+    /^[«"']?(?:Ой|Ох|Ай|Ну|Эх|Ага|Угу|Хм|Эм|М-м|Эээ)[!,.\s—-]+/iu,
+    '',
+  )
 }
 
 export function sanitizeNameOpenersFromHistory(
