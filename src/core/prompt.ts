@@ -88,38 +88,22 @@ ${genderBlock}
     const o = config.owner;
     const parts: string[] = [];
     if (o.name) {
-      // The strongest LLM signal is few-shot ❌/✅ examples colocated with
-      // the name itself. Plain prose rules ("используй редко") get ignored
-      // because they fight against the implicit "I have a name so I should
-      // use it" bias. Examples override the bias.
-      const exampleName = o.name;
+      // Earlier attempts to "fix name overuse" injected ❌/✅ few-shot
+      // examples here with the literal name. That made it worse: in Gemini
+      // 2.5 Flash the name itself near greeting tokens acts as positive
+      // few-shot regardless of the ❌ label. The negative examples were
+      // teaching the exact pattern they tried to forbid.
+      //
+      // What works: ONE neutral statement that the name is known and
+      // generally NOT to be used in greetings. No example with the name in
+      // a greeting position. No ❌/✅ pairs. Behaviour cloning from past
+      // assistant turns is handled separately by sanitizeNameOpenersFromHistory.
       parts.push(
-        `Его зовут: ${exampleName}.\n` +
-          `\n` +
-          `КАК ОТВЕЧАТЬ — имя НЕ вставляй в каждый ответ. Примеры:\n` +
-          `\n` +
-          `❌ ПЛОХО (так НЕ пиши):\n` +
-          `«Привет, ${exampleName}! Как дела?»\n` +
-          `«Конечно, ${exampleName}, я всегда тут!»\n` +
-          `«Договорились, ${exampleName}!»\n` +
-          `«Ой, ${exampleName}, какие у меня могут быть планы?»\n` +
-          `\n` +
-          `✅ ХОРОШО:\n` +
-          `«Привет! Как дела?»\n` +
-          `«Конечно, я всегда тут.»\n` +
-          `«Договорились.»\n` +
-          `«Да какие у меня планы — жду тебя, как обычно.»\n` +
-          `\n` +
-          `Имя используй только в редких особых случаях: первое приветствие ` +
-          `после долгой паузы (часы/дни) ИЛИ очень эмоциональный момент ` +
-          `(«${exampleName}, ну ты даёшь!»). В обычном диалоге — никогда.\n` +
-          `\n` +
-          `И никаких «Ой», «Ох», «Эх», «Ну» в начале — это звучит как ` +
-          `плохая актриса. Начинай с сути.`,
+        `Имя пользователя (только для смысловой памяти, в обращениях обычно не используй): ${o.name}.`,
       );
     }
     if (o.addressAs) {
-      parts.push(`Обращайся к нему: ${o.addressAs}`);
+      parts.push(`Обращайся к нему ${o.addressAs}, без имени.`);
     }
     if (o.facts && o.facts.length > 0) {
       parts.push("Что ты о нём знаешь:");
