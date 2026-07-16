@@ -1,5 +1,6 @@
 import type { LLMClient, LLMMessage, LLMResponse, ToolDefinition, StreamCallback } from "./types.js";
 import { createOpenRouterClient } from "./providers/openrouter.js";
+import { createHubrisClient } from "./providers/hubris.js";
 import { isBillingError, isRateLimitError, checkBalance } from "./providers/openrouter.js";
 
 const DEFAULT_FALLBACKS = [
@@ -84,6 +85,17 @@ export class LLMRouter {
     // Eagerly init delegates so they are always defined
     this.fastDelegate = this.createClient(config.fast_model);
     this.strongDelegate = this.createClient(config.strong_model);
+  }
+
+  private createClient(model: string): LLMClient {
+    // Use Hubris if provider is "hubris" or if api_key starts with "sk-gw-"
+    if (this.config.provider === "hubris" || this.config.api_key.startsWith("sk-gw-")) {
+      console.log(`🔌 Using Hubris provider for model: ${model}`);
+      return createHubrisClient(this.config.api_key, model);
+    }
+    // Otherwise use OpenRouter
+    console.log(`🔌 Using OpenRouter provider for model: ${model}`);
+    return createOpenRouterClient(this.config.api_key, model);
   }
 
   get mode(): "normal" | "degraded" {
