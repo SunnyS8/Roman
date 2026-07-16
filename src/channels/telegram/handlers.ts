@@ -1,8 +1,8 @@
 import type { Bot, Context } from "grammy";
 import type { IncomingMessage, OutgoingMessage, ProgressCallback } from "../../core/types.js";
 import type { MessageHandler } from "../types.js";
-import { sendVoiceResponse } from "./voice.js";
-import { sendVideoNote } from "./video.js";
+import { sendVoiceResponsePiper } from "./piper-voice.js";
+import { sendVideoNoteHubris } from "./hubris-video.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -263,15 +263,16 @@ async function deliver(ctx: Context, response: OutgoingMessage): Promise<void> {
   }
 
   if (mode === "voice") {
-    const sent = await sendVoiceResponse(ctx as never, response.text, voiceConfig ?? {});
+    const voiceId = voiceConfig?.voice_id as string | undefined;
+    const sent = await sendVoiceResponsePiper(ctx as never, response.text, voiceId);
     if (!sent) await replyHtml(ctx, response.text);
     return;
   }
 
   if (mode === "video") {
-    const falApiKey = videoConfig?.fal_api_key as string | undefined;
-    const avatarPath = videoConfig?.avatar_path as string | undefined;
-    const sent = await sendVideoNote(ctx as never, response.text, voiceConfig ?? {}, falApiKey ?? "", avatarPath ?? "");
+    const hubrisApiKey = videoConfig?.hubris_api_key as string | undefined;
+    const videoModel = videoConfig?.model as string | undefined ?? "google/veo-3.1";
+    const sent = await sendVideoNoteHubris(ctx as never, response.text, hubrisApiKey ?? "", videoModel);
     if (!sent) await replyHtml(ctx, response.text);
     return;
   }
