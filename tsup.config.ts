@@ -19,9 +19,13 @@ export default defineConfig({
       const dest2 = "dist/migrations";
       mkdirSync(dest1, { recursive: true });
       mkdirSync(dest2, { recursive: true });
-      cpSync(src, dest1, { recursive: true });
-      cpSync(src, dest2, { recursive: true });
-      console.log("[tsup] copied migrations to dist");
+      try {
+        cpSync(src, dest1, { recursive: true, force: true });
+        cpSync(src, dest2, { recursive: true, force: true });
+        console.log("[tsup] copied migrations to dist");
+      } catch (err) {
+        console.warn("[tsup] warning: could not copy migrations", err);
+      }
     }
   },
 });

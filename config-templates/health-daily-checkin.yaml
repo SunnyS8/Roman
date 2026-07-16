@@ -1,0 +1,15 @@
+name: Ежедневный чек-ин здоровья
+description: Каждый вечер спрашивает о самочувствии, записывает вес и напоминает о целях
+trigger:
+  scheduler: "0 21 * * *"
+steps:
+  - tool: memory
+    action: search
+    params:
+      query: "meal_log today"
+      limit: 20
+  - tool: memory
+    action: search
+    params:
+      query: "weight track health"
+      limit: 5

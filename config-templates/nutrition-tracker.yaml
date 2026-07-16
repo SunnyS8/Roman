@@ -1,0 +1,7 @@
+name: Трекер питания
+description: Записывает приёмы пищи, считает калории за день и анализирует рацион
+trigger: трекер питания
+steps:
+  - tool: food_analysis
+    action: daily_summary
+    params: {}

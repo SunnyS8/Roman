@@ -30,10 +30,10 @@ export class TelegramChannel implements Channel {
   /** Set callback for first-user ownership claim. */
   set onOwnerClaimed(fn: OnOwnerClaimedFn) { this._onOwnerClaimed = fn; }
 
-  async start(config: Record<string, string>): Promise<void> {
-    this.bot = new Bot(config.token);
+  async start(config: Record<string, string | Record<string, unknown>>): Promise<void> {
+    this.bot = new Bot(config.token as string);
     this.bot.api.config.use(autoRetry());
-    this.ownerChatId = config.owner_chat_id ? parseInt(config.owner_chat_id, 10) : null;
+    this.ownerChatId = config.owner_chat_id ? parseInt(config.owner_chat_id as string, 10) : null;
 
     if (!this.handler) {
       throw new Error("TelegramChannel: call onMessage() before start()");
@@ -52,7 +52,10 @@ export class TelegramChannel implements Channel {
       // Non-critical — selfie will use config fallback
     }
 
-    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed);
+    const voiceConfig = config.voice as Record<string, unknown> | undefined;
+    const videoConfig = config.video as Record<string, unknown> | undefined;
+    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed, voiceConfig, videoConfig);
+    this.bot.catch((err) => console.error("❌ Telegram polling error:", err));
     this.bot.start();
   }
 

@@ -26,6 +26,7 @@ import { SkillSearchTool } from "./core/tools/skill-search.js";
 import { SkillInstallTool } from "./core/tools/skill-install.js";
 import { SendFileTool } from "./core/tools/send-file.js";
 import { ConnectServiceTool } from "./core/tools/connect-service.js";
+import { foodAnalysisTool } from "./core/tools/food-analysis.js";
 import { pickEntry } from "./mode.js";
 
 function getAddress(): string {
@@ -154,6 +155,9 @@ async function main() {
     tools.register(new SkillSearchTool({ apiKey: skillsmpKey }));
     tools.register(new SkillInstallTool({ apiKey: llmApiKey ?? undefined }));
   }
+  // Food analysis tool — health coach feature
+  tools.register(foodAnalysisTool);
+
   // Web tool — conditional on google config
   const googleConfig = (config as any).google as { api_key: string; cx: string } | undefined;
   if (googleConfig?.api_key && googleConfig?.cx) {
@@ -218,6 +222,14 @@ async function main() {
       if (!selfieTool.config.referencePhotoUrl && fs.existsSync(savedRef)) {
         selfieTool.setReferencePhoto(savedRef);
         console.log("📸 Референсное фото загружено из ~/.betsy/reference.jpg");
+      } else if (!selfieTool.config.referencePhotoUrl) {
+        // Try to load avatar from config
+        const videoConfig = config.video as Record<string, string> | undefined;
+        const configAvatar = videoConfig?.avatar_path;
+        if (configAvatar && fs.existsSync(configAvatar)) {
+          selfieTool.setReferencePhoto(configAvatar);
+          console.log(`📸 Используется аватар из конфига: ${configAvatar.slice(0, 60)}`);
+        }
       }
       console.log("✅ Telegram бот запущен");
     } catch (err) {

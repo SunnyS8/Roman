@@ -101,8 +101,17 @@ let suspended = false;
 /** Start sending "typing" action with circuit breaker. Returns stop function. */
 function startTyping(ctx: Context): () => void {
   let running = true;
+  const typingInterval = 3000; // Send typing action every 3 seconds (Telegram timeout is ~5 sec)
 
   const tick = async () => {
+    // Send first typing indicator immediately
+    try {
+      await ctx.replyWithChatAction("typing");
+      console.log("⏳ Typing indicator started");
+    } catch (err) {
+      // Silently fail on first attempt
+    }
+
     while (running) {
       if (suspended) {
         await sleep(backoffMs);
@@ -127,12 +136,18 @@ function startTyping(ctx: Context): () => void {
         }
         // Other errors — just skip this tick
       }
-      await sleep(backoffMs);
+      // Wait before next typing indicator
+      await sleep(typingInterval);
     }
   };
 
-  tick();
-  return () => { running = false; };
+  // Start typing in background (don't await)
+  tick().catch(() => {});
+  
+  return () => { 
+    running = false;
+    console.log("⏸ Typing indicator stopped");
+  };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -248,13 +263,15 @@ async function deliver(ctx: Context, response: OutgoingMessage): Promise<void> {
   }
 
   if (mode === "voice") {
-    const sent = await sendVoiceResponse(ctx as never, response.text, {});
+    const sent = await sendVoiceResponse(ctx as never, response.text, voiceConfig ?? {});
     if (!sent) await replyHtml(ctx, response.text);
     return;
   }
 
   if (mode === "video") {
-    const sent = await sendVideoNote(ctx as never, response.text, {}, "", "");
+    const falApiKey = videoConfig?.fal_api_key as string | undefined;
+    const avatarPath = videoConfig?.avatar_path as string | undefined;
+    const sent = await sendVideoNote(ctx as never, response.text, voiceConfig ?? {}, falApiKey ?? "", avatarPath ?? "");
     if (!sent) await replyHtml(ctx, response.text);
     return;
   }
@@ -348,6 +365,8 @@ export function registerHandlers(
   ownerChatId: number | null,
   onSetReferencePhoto?: SetReferencePhotoFn,
   onOwnerClaimed?: OnOwnerClaimedFn,
+  voiceConfig?: Record<string, unknown>,
+  videoConfig?: Record<string, unknown>,
 ): void {
   // --- Owner-only filter ---
   // Mutable so the first user can claim ownership at runtime.
@@ -398,6 +417,7 @@ export function registerHandlers(
     text: string,
     modeOverride?: OutgoingMessage["mode"],
   ): Promise<void> {
+    console.log("🔵 handleWithTyping called for:", text.slice(0, 50));
     const stopTyping = startTyping(ctx);
     const chatId = ctx.chat!.id;
 
