@@ -46,6 +46,8 @@ export function createHubrisClient(apiKey: string, model: string): LLMClient {
       if (streamCb) {
         payload.stream = true;
 
+        console.log(`🔌 Hubris request: model=${model}, streaming=true`);
+        
         const response = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
@@ -55,8 +57,11 @@ export function createHubrisClient(apiKey: string, model: string): LLMClient {
           body: JSON.stringify(payload),
         });
 
+        console.log(`🔌 Hubris response status: ${response.status}`);
+
         if (!response.ok) {
           const error = await response.text();
+          console.error(`❌ Hubris error: ${response.status} - ${error}`);
           throw new Error(`Hubris API error ${response.status}: ${error}`);
         }
 
@@ -115,6 +120,8 @@ export function createHubrisClient(apiKey: string, model: string): LLMClient {
         };
       } else {
         // Non-streaming request
+        console.log(`🔌 Hubris request: model=${model}, streaming=false`);
+        
         const response = await fetch(`${baseUrl}/chat/completions`, {
           method: "POST",
           headers: {
@@ -124,8 +131,11 @@ export function createHubrisClient(apiKey: string, model: string): LLMClient {
           body: JSON.stringify(payload),
         });
 
+        console.log(`🔌 Hubris response status: ${response.status}`);
+
         if (!response.ok) {
           const error = await response.text();
+          console.error(`❌ Hubris error: ${response.status} - ${error}`);
           throw new Error(`Hubris API error ${response.status}: ${error}`);
         }
 
