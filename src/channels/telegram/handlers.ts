@@ -222,7 +222,12 @@ const VIDEO_EXTS = new Set([".mp4", ".webm", ".mkv", ".avi", ".mov"]);
 const AUDIO_EXTS = new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".opus"]);
 
 /** Deliver an OutgoingMessage through the appropriate Telegram media type. */
-async function deliver(ctx: Context, response: OutgoingMessage): Promise<void> {
+async function deliver(
+  ctx: Context,
+  response: OutgoingMessage,
+  voiceConfig?: Record<string, unknown>,
+  videoConfig?: Record<string, unknown>,
+): Promise<void> {
   console.log(`📤 deliver() called, mode=${response.mode}, text_length=${response.text?.length ?? 0}`);
   const mode = response.mode ?? "text";
 
@@ -380,6 +385,7 @@ export function registerHandlers(
   onOwnerClaimed?: OnOwnerClaimedFn,
   voiceConfig?: Record<string, unknown>,
   videoConfig?: Record<string, unknown>,
+  apiKey?: string,
 ): void {
   // --- Owner-only filter ---
   // Mutable so the first user can claim ownership at runtime.
@@ -510,7 +516,7 @@ export function registerHandlers(
       }
 
       // Clear the draft — but skip if response has media (photo will carry the text)
-      if (draftId && draftSupported && !response.mediaUrl) {
+      if (draftId && draftSupported && !response.mediaUrl && modeOverride !== "voice") {
         try {
           await sendDraft(ctx.api, chatId, draftId, response.text);
           await sleep(300);
@@ -518,7 +524,7 @@ export function registerHandlers(
       }
 
       // Send the final message
-      await deliver(ctx, modeOverride ? { ...response, mode: modeOverride } : response);
+      await deliver(ctx, modeOverride ? { ...response, mode: modeOverride } : response, voiceConfig, videoConfig);
     } catch (err) {
       stopTyping();
       if (draftTimer) clearTimeout(draftTimer);
@@ -539,8 +545,11 @@ export function registerHandlers(
 
   // /voice <text>
   bot.command("voice", async (ctx) => {
+    console.log(`🎙️ /voice command received`);
     const body = commandBody(ctx, "voice");
+    console.log(`📝 Voice command body: "${body}"`);
     if (!body) { await ctx.reply("Usage: /voice <text to speak>"); return; }
+    console.log(`🔊 Calling handleWithTyping with mode='voice'`);
     await handleWithTyping(ctx, body, "voice");
   });
 
@@ -621,25 +630,60 @@ export function registerHandlers(
     await handleWithTyping(ctx, userText);
   });
 
-  // Voice messages — extract audio and treat as text input
+// Voice messages — transcribe with OpenRouter Whisper
   bot.on("message:voice", async (ctx) => {
     try {
       const voice = ctx.message.voice;
       if (!voice) return;
+
+      console.log(`🎙️ Получено голосовое (${voice.duration}s)`);
 
       // Download voice file
       const file = await ctx.api.getFile(voice.file_id);
       const token = bot.token;
       const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
       const res = await fetch(fileUrl);
-      const buffer = Buffer.from(await res.arrayBuffer());
+      const audioBuffer = Buffer.from(await res.arrayBuffer());
 
-      // For now: just send acknowledgement
-      // TODO: Add speech-to-text transcription (Whisper API or similar)
-      console.log(`🎙️ Получено голосовое сообщение (${voice.duration}s, ${buffer.length} bytes)`);
+      // Send to OpenRouter Whisper for transcription
+      if (!apiKey) {
+        await ctx.reply("API ключ не найден для распознавания речи 😔");
+        return;
+      }
+
+      console.log(`🔊 Отправляю на распознавание в OpenRouter...`);
       
-      // Send placeholder response
-      await ctx.reply("Получил голосовое! 🎙️ К сожалению, пока не умею распознавать речь, но слышу, что говоришь. Напиши текстом и отвечу! 😊");
+      const formData = new FormData();
+      const blob = new Blob([audioBuffer], { type: "audio/ogg" });
+      formData.append("file", blob, "voice.ogg");
+      formData.append("model", "openai/whisper-1");
+
+      const whisperRes = await fetch("https://openrouter.ai/api/v1/audio/transcriptions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: formData,
+      });
+
+      if (!whisperRes.ok) {
+        const errText = await whisperRes.text();
+        console.error(`❌ Whisper error: ${whisperRes.status}`, errText.slice(0, 200));
+        await ctx.reply("Не удалось распознать речь. Попробуй написать текстом! 😊");
+        return;
+      }
+
+      const whisperData = await whisperRes.json() as { text?: string };
+      const recognizedText = whisperData?.text?.trim() || "";
+      
+      if (!recognizedText) {
+        await ctx.reply("Ничего не расслышал. Повтори, пожалуйста! 🎤");
+        return;
+      }
+
+      console.log(`✅ Распознано: "${recognizedText}"`);
+      // Process the recognized text as a voice command (respond with voice)
+      await handleWithTyping(ctx, recognizedText, "voice");
     } catch (err) {
       console.error("❌ Ошибка обработки голосового:", err instanceof Error ? err.message : err);
       await ctx.reply("Ошибка при обработке голосового 😔");

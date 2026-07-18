@@ -1,6 +1,6 @@
 import type { Tool, ToolResult } from "./types.js";
 
-const MODEL = "google/gemini-2.0-flash-exp:free";
+const MODEL = "google/gemini-3.1-flash-image";
 
 export interface ImageGenToolConfig {
   apiKey: string;

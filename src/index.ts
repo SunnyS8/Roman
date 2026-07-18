@@ -216,6 +216,9 @@ async function main() {
       await telegram.start({
         token: config.telegram.token,
         owner_chat_id: config.telegram.owner_id?.toString() ?? "",
+        voice: (config as any).channels?.telegram?.voice,
+        video: (config as any).channels?.telegram?.video,
+        api_key: getLLMApiKey(config) ?? "",
       });
       // Load saved reference photo if exists and no URL in config
       const savedRef = path.join(os.homedir(), ".betsy", "reference.jpg");
