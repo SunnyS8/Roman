@@ -1,8 +1,8 @@
 import type { Bot, Context } from "grammy";
 import type { IncomingMessage, OutgoingMessage, ProgressCallback } from "../../core/types.js";
 import type { MessageHandler } from "../types.js";
-import { sendVoiceResponse } from "./voice.js";
-import { sendVideoNote } from "./video.js";
+import { sendVoiceResponsePiper } from "./piper-voice.js";
+import { sendVideoNoteHubris } from "./hubris-video.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

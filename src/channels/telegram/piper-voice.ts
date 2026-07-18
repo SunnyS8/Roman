@@ -6,9 +6,7 @@ import os from "node:os";
 /** Strip emojis and other non-spoken characters from text for TTS. */
 function stripEmojis(text: string): string {
   return text
-    // Remove emoji and other symbols
     .replace(/[\u{1F000}-\u{1FFFF}]|[\u{200D}]|[\u{FE00}-\u{FE0F}]|[\u{2702}-\u{27B0}]|[\u{24C2}-\u{1F251}]|[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2934}-\u{2935}]|[\u{2B05}-\u{2B55}]|[\u{3030}]|[\u{303D}]|[\u{3297}]|[\u{3299}]/gu, "")
-    // Collapse multiple spaces
     .replace(/\s{2,}/g, " ")
     .trim();
 }
