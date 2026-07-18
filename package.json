@@ -9,6 +9,7 @@
     "betsy": "./dist/index.js"
   },
   "scripts": {
+    "start": "tsx src/index.ts",
     "build": "tsup",
     "build:ui": "vite build",
     "build:all": "tsup && vite build",
