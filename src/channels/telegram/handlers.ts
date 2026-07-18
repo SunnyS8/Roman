@@ -165,12 +165,21 @@ async function replyHtml(ctx: Context, text: string): Promise<void> {
 
   for (const chunk of chunks) {
     try {
+      console.log(`📤 Sending HTML message (${chunk.length} chars)...`);
       await ctx.reply(chunk, { parse_mode: "HTML" });
-    } catch {
+      console.log(`✅ HTML message sent successfully`);
+    } catch (err) {
+      console.error(`❌ HTML send failed:`, err instanceof Error ? err.message : err);
       // HTML parse failed — send as plain text
       const plainChunks = chunkText(text, MAX_MSG_LEN);
       for (const pc of plainChunks) {
-        await ctx.reply(pc);
+        try {
+          console.log(`📤 Sending plain text message (${pc.length} chars)...`);
+          await ctx.reply(pc);
+          console.log(`✅ Plain text message sent successfully`);
+        } catch (e) {
+          console.error(`❌ Plain text send failed:`, e instanceof Error ? e.message : e);
+        }
       }
       return;
     }
@@ -214,6 +223,7 @@ const AUDIO_EXTS = new Set([".mp3", ".ogg", ".wav", ".flac", ".m4a", ".aac", ".o
 
 /** Deliver an OutgoingMessage through the appropriate Telegram media type. */
 async function deliver(ctx: Context, response: OutgoingMessage): Promise<void> {
+  console.log(`📤 deliver() called, mode=${response.mode}, text_length=${response.text?.length ?? 0}`);
   const mode = response.mode ?? "text";
 
   // If response has a local file to send
@@ -263,12 +273,14 @@ async function deliver(ctx: Context, response: OutgoingMessage): Promise<void> {
   }
 
   if (mode === "voice") {
+    console.log(`🎙️ Voice mode detected`);
     const sent = await sendVoiceResponse(ctx as never, response.text, voiceConfig ?? {});
     if (!sent) await replyHtml(ctx, response.text);
     return;
   }
 
   if (mode === "video") {
+    console.log(`🎬 Video mode detected`);
     const falApiKey = videoConfig?.fal_api_key as string | undefined;
     const avatarPath = videoConfig?.avatar_path as string | undefined;
     const sent = await sendVideoNote(ctx as never, response.text, voiceConfig ?? {}, falApiKey ?? "", avatarPath ?? "");
@@ -276,6 +288,7 @@ async function deliver(ctx: Context, response: OutgoingMessage): Promise<void> {
     return;
   }
 
+  console.log(`📝 Calling replyHtml with text (${response.text?.length ?? 0} chars)`);
   await replyHtml(ctx, response.text);
 }
 
@@ -606,5 +619,30 @@ export function registerHandlers(
   bot.on("message:text", async (ctx) => {
     const userText = ctx.message.text;
     await handleWithTyping(ctx, userText);
+  });
+
+  // Voice messages — extract audio and treat as text input
+  bot.on("message:voice", async (ctx) => {
+    try {
+      const voice = ctx.message.voice;
+      if (!voice) return;
+
+      // Download voice file
+      const file = await ctx.api.getFile(voice.file_id);
+      const token = bot.token;
+      const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+      const res = await fetch(fileUrl);
+      const buffer = Buffer.from(await res.arrayBuffer());
+
+      // For now: just send acknowledgement
+      // TODO: Add speech-to-text transcription (Whisper API or similar)
+      console.log(`🎙️ Получено голосовое сообщение (${voice.duration}s, ${buffer.length} bytes)`);
+      
+      // Send placeholder response
+      await ctx.reply("Получил голосовое! 🎙️ К сожалению, пока не умею распознавать речь, но слышу, что говоришь. Напиши текстом и отвечу! 😊");
+    } catch (err) {
+      console.error("❌ Ошибка обработки голосового:", err instanceof Error ? err.message : err);
+      await ctx.reply("Ошибка при обработке голосового 😔");
+    }
   });
 }
