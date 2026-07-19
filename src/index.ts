@@ -1,6 +1,15 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
+
+// Global error handlers
+process.on("unhandledRejection", (reason) => {
+  console.error("💥 UNHANDLED REJECTION:", reason instanceof Error ? reason.stack : reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("💥 UNCAUGHT EXCEPTION:", err.stack || err.message);
+});
+
 import { createServer } from "./server.js";
 import { isConfigured, loadConfig, saveConfig, getAgentName, getPersonality, getPersonalitySliders, getLLMApiKey } from "./core/config.js";
 import { TelegramChannel } from "./channels/telegram/index.js";
@@ -140,7 +149,7 @@ async function main() {
   const selfiesConfig = config.selfies as Record<string, string> | undefined;
   const videoConfig = config.video as Record<string, string> | undefined;
   const selfieTool = new SelfieTool({
-    falApiKey: selfiesConfig?.fal_api_key ?? videoConfig?.fal_api_key ?? "",
+    apiKey: getLLMApiKey(config) ?? "",
     referencePhotoUrl: selfiesConfig?.reference_photo_url,
   });
   tools.register(selfieTool);

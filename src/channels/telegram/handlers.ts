@@ -603,14 +603,27 @@ export function registerHandlers(
     // /setphoto — save reference photo
     if (caption === "/setphoto") {
       const photo = ctx.message.photo;
+      if (!photo || photo.length === 0) {
+        await ctx.reply("Нет фото в сообщении");
+        return;
+      }
       try {
         const fileId = photo[photo.length - 1].file_id;
         const file = await ctx.api.getFile(fileId);
         const token = bot.token;
+        if (!file.file_path) {
+          await ctx.reply("Не удалось получить путь к файлу");
+          return;
+        }
         const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
         const res = await fetch(fileUrl);
+        if (!res.ok) {
+          await ctx.reply("Не удалось скачать фото");
+          return;
+        }
         const buffer = Buffer.from(await res.arrayBuffer());
         const savePath = path.join(os.homedir(), ".betsy", "reference.jpg");
+        fs.mkdirSync(path.dirname(savePath), { recursive: true });
         fs.writeFileSync(savePath, buffer);
         onSetReferencePhoto?.(savePath);
         await ctx.reply("✅ Фото сохранено как референс для селфи");

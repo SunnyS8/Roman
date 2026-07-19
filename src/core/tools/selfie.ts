@@ -1,9 +1,7 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { Tool, ToolResult } from "./types.js";
-import { uploadToFal } from "../fal-upload.js";
 
-const FAL_ENDPOINT = "https://fal.run/xai/grok-imagine-image/edit";
+const OR_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
+const MODEL = "google/gemini-3.1-flash-image";
 
 const MIRROR_KEYWORDS =
   /одежд|плать|костюм|наряд|юбк|куртк|пальто|шуб|худи|футболк|джинс|туфл|кроссовк|шапк|очк|аксессуар|образ|стиль|лук|мод[аы]|примерк|надел|ношу|переодел|outfit|wearing|clothes|dress|suit|fashion|full.body|mirror|hoodie|jacket/i;
@@ -19,13 +17,13 @@ function detectMode(context: string): "mirror" | "direct" {
 
 function buildPrompt(context: string, mode: "mirror" | "direct"): string {
   if (mode === "mirror") {
-    return `make a pic of this person, but ${context}. the person is taking a mirror selfie, full body visible in the mirror`;
+    return `selfie of a young man taking a mirror selfie, full body visible in the mirror, ${context}, realistic photo style, natural lighting`;
   }
-  return `a close-up selfie taken by herself, ${context}, direct eye contact with the camera, looking straight into the lens, phone held at arm's length, face fully visible, natural and casual`;
+  return `close-up selfie of a young man, ${context}, direct eye contact with the camera, natural and casual, realistic photo style, natural lighting, high quality`;
 }
 
 export interface SelfieToolConfig {
-  falApiKey: string;
+  apiKey?: string;
   referencePhotoUrl?: string;
 }
 
@@ -45,16 +43,8 @@ export class SelfieTool implements Tool {
   }
 
   /** Set reference photo path or URL. */
-  setReferencePhoto(pathOrUrl: string): void {
-    this.config.referencePhotoUrl = pathOrUrl;
-  }
-
-  /** Resolve reference to a URL that fal.ai can access. */
-  private async resolveReferenceUrl(ref: string): Promise<string> {
-    if (ref.startsWith("http")) return ref;
-    // Local file — upload to fal.ai storage
-    const buffer = fs.readFileSync(ref);
-    return uploadToFal(buffer, path.basename(ref), this.config.falApiKey);
+  setReferencePhoto(_pathOrUrl: string): void {
+    // Reference photo not supported via OpenRouter, but kept for interface compatibility
   }
 
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
@@ -63,17 +53,11 @@ export class SelfieTool implements Tool {
       return { success: false, output: "Не указан контекст для селфи", error: "Missing context" };
     }
 
-    if (!this.config.falApiKey) {
+    const apiKey = this.config.apiKey;
+    if (!apiKey) {
       return {
         success: false,
-        output: "Для генерации селфи нужен API-ключ fal.ai. Попроси пользователя получить ключ на https://fal.ai/dashboard/keys и прислать его тебе. Сохрани через self_config с ключом fal_api_key.",
-      };
-    }
-
-    if (!this.config.referencePhotoUrl) {
-      return {
-        success: false,
-        output: "Не задано референсное фото. Попроси пользователя отправить своё фото и написать /setphoto.",
+        output: "API ключ не настроен для генерации селфи",
       };
     }
 
@@ -84,56 +68,59 @@ export class SelfieTool implements Tool {
     const prompt = buildPrompt(context, mode);
 
     try {
-      const refUrl = await this.resolveReferenceUrl(this.config.referencePhotoUrl);
-      console.log(`📸 Selfie: mode=${mode}, ref=${refUrl.slice(0, 80)}`);
+      console.log(`📸 Selfie (OpenRouter): mode=${mode}, prompt="${prompt.slice(0, 100)}"`);
 
-      const response = await fetch(FAL_ENDPOINT, {
+      const response = await fetch(OR_ENDPOINT, {
         method: "POST",
         headers: {
-          Authorization: `Key ${this.config.falApiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          image_url: refUrl,
-          prompt,
-          num_images: 1,
-          output_format: "jpeg",
+          model: MODEL,
+          messages: [{ role: "user", content: prompt }],
+          modalities: ["image", "text"],
         }),
       });
 
       if (!response.ok) {
         const errText = await response.text();
-        console.error(`📸 Selfie fal.ai error ${response.status}: ${errText.slice(0, 300)}`);
+        console.error(`📸 Selfie OR error ${response.status}: ${errText.slice(0, 200)}`);
         return {
           success: false,
-          output: `Ошибка fal.ai: ${response.status}`,
-          error: errText.slice(0, 300),
+          output: `Ошибка OpenRouter: ${response.status}`,
+          error: errText.slice(0, 200),
         };
       }
 
-      const data = (await response.json()) as {
-        images?: Array<{ url: string }>;
-      };
+      const raw = await response.text();
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return { success: false, output: "Некорректный ответ OpenRouter" };
 
-      const imageUrl = data.images?.[0]?.url;
-      if (!imageUrl) {
-        console.error("📸 Selfie: no image in fal.ai response", JSON.stringify(data).slice(0, 300));
-        return { success: false, output: "fal.ai не вернул изображение", error: "No image in response" };
+      const data = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      const choices = data.choices as Array<Record<string, unknown>> | undefined;
+      const message = choices?.[0]?.message as Record<string, unknown> | undefined;
+
+      // Try images array
+      const images = message?.images as Array<{ image_url?: { url?: string } }> | undefined;
+      const imageUrl = images?.[0]?.image_url?.url;
+      if (imageUrl) {
+        console.log(`📸 Selfie OK: ${imageUrl.slice(0, 60)}`);
+        return { success: true, output: "Селфи сгенерировано", mediaUrl: imageUrl };
       }
 
-      console.log(`📸 Selfie OK: ${imageUrl.slice(0, 80)}`);
-      return {
-        success: true,
-        output: "Селфи сгенерировано",
-        mediaUrl: imageUrl,
-      };
+      // Try base64 from content
+      const content = String(message?.content ?? "");
+      const b64Match = content.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/);
+      if (b64Match) {
+        return { success: true, output: "Селфи сгенерировано", mediaUrl: b64Match[0] };
+      }
+
+      console.error("📸 Selfie: no image in response", JSON.stringify(data).slice(0, 300));
+      return { success: false, output: "Модель не вернула изображение" };
     } catch (err) {
       console.error(`📸 Selfie exception: ${err instanceof Error ? err.message : err}`);
-      return {
-        success: false,
-        output: "Ошибка при генерации селфи",
-        error: err instanceof Error ? err.message : String(err),
-      };
+      return { success: false, output: "Ошибка при генерации селфи" };
     }
   }
 }
