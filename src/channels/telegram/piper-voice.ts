@@ -25,8 +25,6 @@ export async function synthesizePiper(text: string, voiceId: string = "ru-RU-Dmi
     let stderr = "";
     const proc = spawn("edge-tts", [
       "--voice", voiceId,
-      "--rate", "-10%",
-      "--pitch", "-3Hz",
       "--text", cleanText,
       "--write-media", tmpFile,
     ], { stdio: ["ignore", "pipe", "pipe"] });

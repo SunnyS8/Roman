@@ -3,6 +3,7 @@ import { autoRetry } from "@grammyjs/auto-retry";
 import type { Channel, MessageHandler } from "../types.js";
 import type { OutgoingMessage } from "../../core/types.js";
 import { registerHandlers, type SetReferencePhotoFn, type OnOwnerClaimedFn } from "./handlers.js";
+import type { SubscriptionStore } from "../../core/subscription-store.js";
 
 /**
  * Telegram channel adapter.
@@ -20,6 +21,7 @@ export class TelegramChannel implements Channel {
   private _avatarUrl: string | null = null;
   private _onSetReferencePhoto: SetReferencePhotoFn | undefined;
   private _onOwnerClaimed: OnOwnerClaimedFn | undefined;
+  subscriptionStore: SubscriptionStore | null = null;
 
   /** Bot avatar URL fetched at startup. */
   get avatarUrl(): string | null { return this._avatarUrl; }
@@ -58,9 +60,28 @@ export class TelegramChannel implements Channel {
     console.log(`🎙️ Voice config:`, voiceConfig);
     console.log(`🎬 Video config:`, videoConfig);
     console.log(`🔑 LLM API key:`, llmApiKey ? `${llmApiKey.slice(0, 8)}...` : "not set");
-    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed, voiceConfig, videoConfig, llmApiKey);
+    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed, voiceConfig, videoConfig, llmApiKey, this.subscriptionStore ?? undefined);
     this.bot.catch((err) => console.error("❌ Telegram polling error:", err));
-    this.bot.start();
+
+    // Start polling (fire-and-forget, start() never completes)
+    const startPolling = async () => {
+      const maxAttempts = 2;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          await this.bot!.start({ drop_pending_updates: true, allowed_updates: ["message", "callback_query"] });
+          return;
+        } catch (err: any) {
+          if ((err?.message?.includes("409") || err?.message?.includes("Conflict")) && attempt < maxAttempts) {
+            console.warn(`⚠️ 409 Conflict (попытка ${attempt}/${maxAttempts}), жду 5s...`);
+            await new Promise((r) => setTimeout(r, 5000));
+            continue;
+          }
+          console.error("❌ Telegram poll error:", err instanceof Error ? err.message : err);
+          return;
+        }
+      }
+    };
+    startPolling();
   }
 
   async stop(): Promise<void> {

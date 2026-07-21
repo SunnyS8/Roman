@@ -64,3 +64,13 @@ export function getKnowledgeCount(): number {
   const row = db.prepare("SELECT COUNT(*) as count FROM knowledge").get() as { count: number };
   return row.count;
 }
+
+/**
+ * Delete all knowledge entries with the given topic.
+ * Returns the number of deleted rows.
+ */
+export function deleteKnowledgeByTopic(topic: string): number {
+  const db = getDB();
+  const result = db.prepare("DELETE FROM knowledge WHERE topic = ?").run(topic);
+  return result.changes;
+}

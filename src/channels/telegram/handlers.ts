@@ -1,8 +1,9 @@
 import type { Bot, Context } from "grammy";
 import type { IncomingMessage, OutgoingMessage, ProgressCallback } from "../../core/types.js";
 import type { MessageHandler } from "../types.js";
-import { sendVoiceResponsePiper } from "./piper-voice.js";
+import { sendVoiceResponse } from "./voice.js";
 import { sendVideoNoteHubris } from "./hubris-video.js";
+import { SubscriptionStore } from "../../core/subscription-store.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -286,9 +287,8 @@ async function deliver(
 
   if (mode === "video") {
     console.log(`🎬 Video mode detected`);
-    const falApiKey = videoConfig?.fal_api_key as string | undefined;
-    const avatarPath = videoConfig?.avatar_path as string | undefined;
-    const sent = await sendVideoNote(ctx as never, response.text, voiceConfig ?? {}, falApiKey ?? "", avatarPath ?? "");
+    const model = (videoConfig?.model as string) || "google/veo-3.1";
+    const sent = await sendVideoNoteHubris(ctx as never, response.text, apiKey ?? "", model);
     if (!sent) await replyHtml(ctx, response.text);
     return;
   }
@@ -386,9 +386,9 @@ export function registerHandlers(
   voiceConfig?: Record<string, unknown>,
   videoConfig?: Record<string, unknown>,
   apiKey?: string,
+  subscriptionStore?: SubscriptionStore,
 ): void {
-  // --- Owner-only filter ---
-  // Mutable so the first user can claim ownership at runtime.
+  // --- Owner tracking (admin) + subscription check ---
   let currentOwner = ownerChatId;
 
   bot.use(async (ctx, next) => {
@@ -402,35 +402,29 @@ export function registerHandlers(
       console.log(`🔒 Владелец бота установлен: ${chatId}`);
     }
 
-    if (chatId !== currentOwner) {
-      await ctx.reply("Этот бот приватный.");
-      return;
+    // Subscription check (skip for owner — always allowed)
+    if (subscriptionStore && chatId !== currentOwner) {
+      const userId = String(chatId);
+      const existing = subscriptionStore.getSubscription(userId);
+      
+      if (!existing) {
+        // New user — create trial subscription
+        const sub = subscriptionStore.getOrCreateSubscription(userId);
+        const trialDays = subscriptionStore.getTrialDays();
+        const dayWord = trialDays === 1 ? "день" : "дня";
+        const welcomeMsg = `Привет! Я Роман. Буду рад поболтать, помочь с едой, настроением и привычками.\n\n🎁 У тебя бесплатный доступ на ${trialDays} ${dayWord} — всё включено! Приятного знакомства 😊`;
+        await ctx.reply(welcomeMsg);
+        console.log(`🆕 Новый пользователь: ${chatId}, триал ${trialDays} ${dayWord}`);
+      } else if (existing.tier === "free" && subscriptionStore.isOverDailyLimit(userId)) {
+        await ctx.reply("Привет! Лимит бесплатных сообщений на сегодня исчерпан. Завтра снова смогу помочь. Или оформи подписку, чтобы снять ограничения!");
+        return;
+      }
     }
+
     await next();
   });
 
-  // -----------------------------------------------------------------------
-  // Native Telegram sendMessageDraft streaming (Bot API Dec 2025)
-  // -----------------------------------------------------------------------
-
-  /** Unique draft ID counter — each streaming response gets its own. */
-  let nextDraftId = 0;
-
-  /** Call the native sendMessageDraft Bot API method. */
-  async function sendDraft(apiObj: Bot["api"], chatId: number, draftId: number, text: string): Promise<void> {
-    const raw = apiObj as Bot["api"] & {
-      sendMessageDraft?: (chatId: number, draftId: number, text: string, params?: { parse_mode?: string }) => Promise<unknown>;
-    };
-    if (typeof raw.sendMessageDraft === "function") {
-      await raw.sendMessageDraft(chatId, draftId, text);
-      return;
-    }
-    // Fallback: call raw API via grammy's raw method
-    await (apiObj as unknown as { raw: { sendMessageDraft: (body: Record<string, unknown>) => Promise<unknown> } })
-      .raw.sendMessageDraft({ chat_id: chatId, draft_id: draftId, text });
-  }
-
-  /** Handle message with native draft streaming and tool progress. */
+  /** Handle message with typing indicator and tool progress. */
   async function handleWithTyping(
     ctx: Context,
     text: string,
@@ -440,57 +434,20 @@ export function registerHandlers(
     const stopTyping = startTyping(ctx);
     const chatId = ctx.chat!.id;
 
-    // Streaming state
-    let streamText = "";
-    let draftId = 0;
-    let lastDraftTime = 0;
-    let draftTimer: ReturnType<typeof setTimeout> | null = null;
-    let draftSupported = true;
     let statusMsgId: number | null = null;
-
-    /** Flush current accumulated text to draft. */
-    const flushDraft = async () => {
-      if (!streamText || !draftId || !draftSupported) return;
-      try {
-        await sendDraft(ctx.api, chatId, draftId, streamText + " ▌");
-        lastDraftTime = Date.now();
-      } catch {
-        // sendMessageDraft not supported — stop trying
-        draftSupported = false;
-      }
-    };
 
     const onProgress: ProgressCallback = (event) => {
       if (event.type === "text_chunk") {
-        streamText += event.chunk;
-
-        // Allocate draft ID on first chunk
-        if (!draftId) {
-          nextDraftId = nextDraftId >= 2_147_483_647 ? 1 : nextDraftId + 1;
-          draftId = nextDraftId;
-
-          // Delete status message if exists
-          if (statusMsgId) {
-            ctx.api.deleteMessage(chatId, statusMsgId).catch(() => {});
-            statusMsgId = null;
-          }
-        }
-
-        // Throttle drafts to ~every 500ms
-        if (Date.now() - lastDraftTime > 500) {
-          flushDraft();
-        } else if (!draftTimer) {
-          draftTimer = setTimeout(() => {
-            draftTimer = null;
-            flushDraft();
-          }, 500);
+        if (statusMsgId) {
+          ctx.api.deleteMessage(chatId, statusMsgId).catch(() => {});
+          statusMsgId = null;
         }
         return;
       }
 
       if (event.type === "tool_start") {
         const label = TOOL_LABELS[event.tool];
-        if (!label) return; // skip status for unlisted tools (e.g. selfie)
+        if (!label) return;
         const statusText = `⏳ ${label}...`;
         if (statusMsgId) {
           ctx.api.editMessageText(chatId, statusMsgId, statusText).catch(() => {});
@@ -508,26 +465,14 @@ export function registerHandlers(
     try {
       const response = await handler(await toIncoming(ctx, text, bot.token), onProgress);
       stopTyping();
-      if (draftTimer) clearTimeout(draftTimer);
 
-      // Clean up status message
       if (statusMsgId) {
         ctx.api.deleteMessage(chatId, statusMsgId).catch(() => {});
       }
 
-      // Clear the draft — but skip if response has media (photo will carry the text)
-      if (draftId && draftSupported && !response.mediaUrl && modeOverride !== "voice") {
-        try {
-          await sendDraft(ctx.api, chatId, draftId, response.text);
-          await sleep(300);
-        } catch { /* ignore */ }
-      }
-
-      // Send the final message
       await deliver(ctx, modeOverride ? { ...response, mode: modeOverride } : response, voiceConfig, videoConfig);
     } catch (err) {
       stopTyping();
-      if (draftTimer) clearTimeout(draftTimer);
       if (statusMsgId) {
         ctx.api.deleteMessage(chatId, statusMsgId).catch(() => {});
       }
@@ -577,16 +522,25 @@ export function registerHandlers(
     try {
       const fileId = photo[photo.length - 1].file_id;
       const file = await ctx.api.getFile(fileId);
+      if (!file.file_path) {
+        await ctx.reply("Не удалось получить путь к файлу");
+        return;
+      }
       const token = bot.token;
       const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-      // Download and save locally
       const res = await fetch(fileUrl);
+      if (!res.ok) {
+        await ctx.reply("Не удалось скачать фото");
+        return;
+      }
       const buffer = Buffer.from(await res.arrayBuffer());
       const savePath = path.join(os.homedir(), ".betsy", "reference.jpg");
+      fs.mkdirSync(path.dirname(savePath), { recursive: true });
       fs.writeFileSync(savePath, buffer);
       onSetReferencePhoto?.(savePath);
       await ctx.reply("✅ Фото сохранено как референс для селфи");
-    } catch {
+    } catch (err) {
+      console.error("❌ /setphoto error:", err instanceof Error ? err.message : err);
       await ctx.reply("Не удалось обработать фото");
     }
   });
@@ -627,7 +581,8 @@ export function registerHandlers(
         fs.writeFileSync(savePath, buffer);
         onSetReferencePhoto?.(savePath);
         await ctx.reply("✅ Фото сохранено как референс для селфи");
-      } catch {
+      } catch (err) {
+        console.error("❌ /setphoto (photo msg) error:", err instanceof Error ? err.message : err);
         await ctx.reply("Не удалось обработать фото");
       }
       return;

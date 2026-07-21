@@ -10,6 +10,7 @@ import { LLMUnavailableError } from "./llm/router.js";
 import { TokenStore } from "../services/tokens.js";
 import { getService } from "../services/catalog.js";
 import { SkillsStore } from "../services/skills-store.js";
+import { SubscriptionStore, type Tier } from "./subscription-store.js";
 
 function historyChars(history: LLMMessage[]): number {
   let total = 0;
@@ -38,6 +39,7 @@ export interface EngineDeps {
   tools: ToolRegistry;
   contextBudget: number;
   encryptionKey?: string;
+  subscriptionStore?: SubscriptionStore;
 }
 
 export class Engine {
@@ -124,8 +126,8 @@ export class Engine {
 
     saveMessage(userId, msg.channelName, "user", textContent);
 
-    // Build tool definitions for the LLM
-    const tools = this.buildToolDefinitions();
+    // Build tool definitions for the LLM (filtered by subscription tier)
+    const tools = this.buildToolDefinitions(userId);
 
     try {
       let lastMediaUrl: string | undefined;
@@ -419,8 +421,17 @@ export class Engine {
     this.compactionInFlight.set(userId, promise);
   }
 
-  /** Execute a single tool by name. Returns full ToolResult. */
+  /** Execute a single tool by name. Returns full ToolResult.
+   *  Rejects if the user's subscription doesn't allow this tool. */
   private async executeTool(name: string, args: Record<string, unknown>, userId?: string): Promise<ToolResult> {
+    const store = this.deps.subscriptionStore;
+    if (store && userId) {
+      const sub = store.getSubscription(userId);
+      if (sub && !store.isToolAllowed(name, sub.tier)) {
+        return { success: false, output: "", error: `Инструмент "${name}" недоступен на твоём тарифе.` };
+      }
+    }
+
     const tool = this.deps.tools.get(name);
     if (!tool) {
       return { success: false, output: "", error: `unknown tool "${name}"` };
@@ -434,26 +445,40 @@ export class Engine {
     }
   }
 
-  /** Convert our ToolParam[] format to OpenAI function-calling ToolDefinition[]. */
-  private buildToolDefinitions(): ToolDefinition[] {
-    return this.deps.tools.list().map((tool) => ({
-      type: "function" as const,
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: {
-          type: "object" as const,
-          properties: Object.fromEntries(
-            tool.parameters.map((p) => [
-              p.name,
-              { type: p.type, description: p.description },
-            ]),
-          ),
-          required: tool.parameters
-            .filter((p) => p.required)
-            .map((p) => p.name),
+  /** Convert our ToolParam[] format to OpenAI function-calling ToolDefinition[].
+   *  Filters out tools the user's subscription tier doesn't have access to.
+   *  If user has no subscription (e.g. owner bypassing middleware), defaults to premium. */
+  private buildToolDefinitions(userId?: string): ToolDefinition[] {
+    const store = this.deps.subscriptionStore;
+    let tier: Tier = "premium";
+    if (store && userId) {
+      const sub = store.getSubscription(userId);
+      if (sub) tier = sub.tier;
+    }
+
+    return this.deps.tools.list()
+      .filter((tool) => {
+        if (!store) return true;
+        return store.isToolAllowed(tool.name, tier);
+      })
+      .map((tool) => ({
+        type: "function" as const,
+        function: {
+          name: tool.name,
+          description: tool.description,
+          parameters: {
+            type: "object" as const,
+            properties: Object.fromEntries(
+              tool.parameters.map((p) => [
+                p.name,
+                { type: p.type, description: p.description },
+              ]),
+            ),
+            required: tool.parameters
+              .filter((p) => p.required)
+              .map((p) => p.name),
+          },
         },
-      },
-    }));
+      }));
   }
 }

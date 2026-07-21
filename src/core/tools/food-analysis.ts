@@ -10,6 +10,23 @@ interface FoodInfo {
 }
 
 const foodDB: Record<string, FoodInfo> = {
+  // ============ ЯЙЦА ============
+  "яйцо": { kcal: 155, protein: 12.7, fat: 11.0, carbs: 0.7 },
+  "яйца": { kcal: 155, protein: 12.7, fat: 11.0, carbs: 0.7 },
+  "яичница": { kcal: 175, protein: 12.0, fat: 13.5, carbs: 1.0 },
+  "яичница глазунья": { kcal: 175, protein: 12.0, fat: 13.5, carbs: 1.0 },
+  "яичница-болтунья": { kcal: 170, protein: 11.5, fat: 13.0, carbs: 1.5 },
+  "омлет": { kcal: 155, protein: 10.5, fat: 11.5, carbs: 1.5 },
+  "омлет с молоком": { kcal: 140, protein: 9.0, fat: 10.0, carbs: 2.5 },
+  "омлет с сыром": { kcal: 210, protein: 14.0, fat: 16.0, carbs: 2.0 },
+  "омлет с овощами": { kcal: 120, protein: 8.0, fat: 8.0, carbs: 3.5 },
+  "яйцо варёное": { kcal: 155, protein: 12.7, fat: 11.0, carbs: 0.7 },
+  "яйцо всмятку": { kcal: 155, protein: 12.7, fat: 11.0, carbs: 0.7 },
+  "яйцо пашот": { kcal: 155, protein: 12.7, fat: 11.0, carbs: 0.7 },
+  "яичный белок": { kcal: 50, protein: 11.0, fat: 0.0, carbs: 0.5 },
+  "яичный желток": { kcal: 325, protein: 16.0, fat: 27.0, carbs: 1.5 },
+  "яйцо перепелиное": { kcal: 168, protein: 12.0, fat: 13.0, carbs: 0.5 },
+
   // ============ КАШИ И КРУПЫ ============
   "овсяная каша": { kcal: 88, protein: 3.2, fat: 1.5, carbs: 15.4, fiber: 1.7 },
   "овсянка": { kcal: 88, protein: 3.2, fat: 1.5, carbs: 15.4, fiber: 1.7 },
@@ -123,6 +140,10 @@ const foodDB: Record<string, FoodInfo> = {
   "корейка": { kcal: 350, protein: 14.0, fat: 33.0, carbs: 0.0 },
 
   // ============ РЫБА И МОРЕПРОДУКТЫ ============
+  "тилапия": { kcal: 96, protein: 20.1, fat: 1.7, carbs: 0.0 },
+  "филе тилапии": { kcal: 96, protein: 20.1, fat: 1.7, carbs: 0.0 },
+  "телапия": { kcal: 96, protein: 20.1, fat: 1.7, carbs: 0.0 },
+  "филе телапии": { kcal: 96, protein: 20.1, fat: 1.7, carbs: 0.0 },
   "треска": { kcal: 82, protein: 18.0, fat: 0.7, carbs: 0.0 },
   "хек": { kcal: 86, protein: 17.0, fat: 1.8, carbs: 0.0 },
   "минтай": { kcal: 72, protein: 16.0, fat: 0.6, carbs: 0.0 },
@@ -605,8 +626,34 @@ const foodDB: Record<string, FoodInfo> = {
   "кисель овсяный": { kcal: 40, protein: 1.0, fat: 0.5, carbs: 8.0, fiber: 0.5 },
 };
 
+const STOP_WORDS = new Set([
+  "с","со","из","в","на","и","а","но","от","до","по",
+  "под","над","за","у","о","об","без","для","через","про",
+  "при","к","ко","во","не","ни","же","бы","ли",
+]);
+
 function normalizeName(name: string): string {
   return name.toLowerCase().replace(/ё/g, "е").replace(/[^а-яa-z0-9\s]/g, "").trim();
+}
+
+/** Simple character-level similarity (0..1). */
+function similarity(a: string, b: string): number {
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  const matrix: number[][] = [];
+  for (let i = 0; i <= a.length; i++) { matrix[i] = [i]; }
+  for (let j = 0; j <= b.length; j++) { matrix[0][j] = j; }
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j - 1] + cost);
+    }
+  }
+  return 1 - matrix[a.length][b.length] / maxLen;
+}
+
+function extractWords(s: string): string[] {
+  return s.split(/\s+/).filter((w) => w.length > 1 && !STOP_WORDS.has(w));
 }
 
 function findFood(query: string): { key: string; info: FoodInfo } | null {
@@ -615,29 +662,46 @@ function findFood(query: string): { key: string; info: FoodInfo } | null {
 
   if (foodDB[normalized]) return { key: normalized, info: foodDB[normalized] };
 
+  const qWords = extractWords(normalized);
+  if (qWords.length === 0) return null;
+
   const keys = Object.keys(foodDB);
   let best: { key: string; info: FoodInfo } | null = null;
   let bestScore = 0;
 
   for (const key of keys) {
-    let score = 0;
     const nk = normalizeName(key);
-
     if (nk === normalized) return { key, info: foodDB[key] };
 
-    if (nk.includes(normalized) || normalized.includes(nk)) {
-      score = Math.max(score, Math.min(nk.length, normalized.length));
+    const kWords = extractWords(nk);
+    if (kWords.length === 0) continue;
+
+    let score = 0;
+
+    // 1) Exact whole-word matches (highest weight)
+    for (const kw of kWords) {
+      if (qWords.includes(kw)) score += 15;
     }
 
-    const qWords = normalized.split(/\s+/).filter(Boolean);
-    const kWords = nk.split(/\s+/);
-    let matches = 0;
+    // 2) Key is a substring of query or vice versa — good catch-all
+    if (nk.includes(normalized) || normalized.includes(nk)) score += 8;
+
+    // 3) Common prefix match — catches сметана↔сметаной, гречки↔гречка etc
     for (const qw of qWords) {
       for (const kw of kWords) {
-        if (kw.includes(qw) || qw.includes(kw)) matches++;
+        if (kw === qw) continue;
+        let common = 0;
+        while (common < qw.length && common < kw.length && qw[common] === kw[common]) common++;
+        if (common >= 4) {
+          score += 4;
+          // Bonus for near-identical words (different ending only)
+          if (common >= Math.min(qw.length, kw.length) - 1) score += 6;
+        }
       }
     }
-    score = Math.max(score, matches * 3);
+
+    // 4) Bonus for first word match (usually the core food)
+    if (kWords.length > 0 && qWords.includes(kWords[0])) score += 5;
 
     if (score > bestScore) {
       bestScore = score;
@@ -675,7 +739,7 @@ function analyzeFood(foodName: string, grams: number): string {
 }
 
 function generateDailySummary(meals: Array<{ name: string; grams: number; mealType: string }>): string {
-  if (meals.length === 0) return "За сегодня приёмов пищи пока не записано.";
+  if (meals.length === 0) return "📋 *Сводка за день*\n\nЗа сегодня приёмов пищи пока не записано.";
 
   let totalKcal = 0;
   let totalProtein = 0;
@@ -711,26 +775,83 @@ function generateDailySummary(meals: Array<{ name: string; grams: number; mealTy
   return result;
 }
 
+function generateWeeklySummary(entries: Array<{
+  name: string; grams: number; mealType: string; day: string;
+}>): string {
+  if (entries.length === 0) return "📊 *Сводка за неделю*\n\nЗа последние 7 дней записи отсутствуют.";
+
+  let totalKcal = 0; let totalProtein = 0; let totalFat = 0; let totalCarbs = 0;
+  const byDay: Record<string, typeof entries> = {};
+  const dayTotals: Record<string, { kcal: number; p: number; f: number; c: number }> = {};
+
+  for (const meal of entries) {
+    const found = findFood(meal.name);
+    if (!found) continue;
+    const ratio = meal.grams / 100;
+    const kcal = found.info.kcal * ratio;
+    const p = found.info.protein * ratio;
+    const f = found.info.fat * ratio;
+    const c = found.info.carbs * ratio;
+    totalKcal += kcal; totalProtein += p; totalFat += f; totalCarbs += c;
+    if (!byDay[meal.day]) byDay[meal.day] = [];
+    byDay[meal.day].push(meal);
+    if (!dayTotals[meal.day]) dayTotals[meal.day] = { kcal: 0, p: 0, f: 0, c: 0 };
+    dayTotals[meal.day].kcal += kcal;
+    dayTotals[meal.day].p += p;
+    dayTotals[meal.day].f += f;
+    dayTotals[meal.day].c += c;
+  }
+
+  const days = Object.keys(byDay);
+  let result = `📊 *Сводка за неделю*\n\n`;
+  result += `📅 ${days[0]} — ${days[days.length - 1]}\n\n`;
+
+  for (const day of days) {
+    const t = dayTotals[day];
+    result += `*${day}* — ${Math.round(t.kcal)} ккал`;
+    const mealsByType: Record<string, string[]> = {};
+    for (const m of byDay[day]) {
+      if (!mealsByType[m.mealType]) mealsByType[m.mealType] = [];
+      mealsByType[m.mealType].push(`${m.name} (${m.grams} г)`);
+    }
+    for (const [type, items] of Object.entries(mealsByType)) {
+      result += `\n  ${type}: ${items.join(", ")}`;
+    }
+    result += "\n\n";
+  }
+
+  const avgKcal = totalKcal / days.length;
+  result += `🔸 *Итого за неделю*: **${Math.round(totalKcal)} ккал**\n`;
+  result += `🔸 *В среднем в день*: **${Math.round(avgKcal)} ккал**\n`;
+  result += `🔸 Белки: ${Math.round(totalProtein * 10) / 10} г\n`;
+  result += `🔸 Жиры: ${Math.round(totalFat * 10) / 10} г\n`;
+  result += `🔸 Углеводы: ${Math.round(totalCarbs * 10) / 10} г\n`;
+
+  return result;
+}
+
 export const foodAnalysisTool: Tool = {
   name: "food_analysis",
   description:
     "Анализирует продукты и блюда, подсчитывает калории и БЖУ. " +
-    "База содержит ${Object.keys(foodDB).length}+ продуктов: от диетических до фастфуда. " +
-    "Используй после того, как визуально определил(а) блюдо по фото. " +
+    `База содержит ${Object.keys(foodDB).length}+ продуктов: от диетических до фастфуда. ` +
+    "ВАЖНО: указывай ТОЛЬКО короткое название продукта (1-2 слова), а не описание блюда. " +
+    "Например, 'салат', а не 'салат из огурцов и помидоров'. " +
     "Доступные действия: analyze — проанализировать продукт/блюдо и получить калории; " +
     "log_meal — записать приём пищи в дневник; " +
-    "daily_summary — получить сводку за сегодня из записанных приёмов.",
+    "daily_summary — получить сводку за сегодня; " +
+    "weekly_report — получить сводку за последние 7 дней.",
   parameters: [
     {
       name: "action",
       type: "string",
-      description: "Действие: analyze (анализ), log_meal (записать приём), daily_summary (сводка за день)",
+      description: "Действие: analyze (анализ), log_meal (записать приём), daily_summary (сводка за день), weekly_report (сводка за неделю)",
       required: true,
     },
     {
       name: "food_name",
       type: "string",
-      description: "Название продукта или блюда (для analyze и log_meal). Примеры: гречка, пицца, борщ, пельмени, шоколад, чипсы",
+      description: "Название продукта или блюда (для analyze и log_meal). Указывай коротко: 'гречка', 'борщ', 'салат', 'куриная грудка', 'яблоко'. Без описаний и предлогов!",
     },
     {
       name: "grams",
@@ -768,11 +889,21 @@ export const foodAnalysisTool: Tool = {
         const found = findFood(foodName);
 
         if (!found) {
-          return {
-            success: false,
-            output: `Продукт "${foodName}" не найден в базе. Сначала используй analyze с точным названием.`,
-            error: "not_found",
-          };
+          // Suggest close matches
+          const normalized = foodName.toLowerCase().replace(/ё/g, "е");
+          const suggestions = Object.keys(foodDB)
+            .map((k) => ({ key: k, score: similarity(normalized, k.toLowerCase().replace(/ё/g, "е")) }))
+            .filter((s) => s.score > 0.2)
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 5)
+            .map((s) => s.key);
+          let msg = `❌ Продукт "${foodName}" не найден в базе (всего ${Object.keys(foodDB).length} продуктов).`;
+          if (suggestions.length > 0) {
+            msg += `\n\nВозможно, ты имел(а) в виду:\n${suggestions.map((s) => `• ${s}`).join("\n")}`;
+          } else {
+            msg += `\nПопробуй написать иначе или используй analyze с точным названием.`;
+          }
+          return { success: false, output: msg, error: "not_found" };
         }
 
         const logEntry = `[${mealType}] ${found.key} — ${grams} г (${Math.round(found.info.kcal * grams / 100)} ккал)`;
@@ -810,6 +941,33 @@ export const foodAnalysisTool: Tool = {
           .filter((m): m is NonNullable<typeof m> => m !== null);
 
         return { success: true, output: generateDailySummary(meals) };
+      }
+
+      case "weekly_report": {
+        const entries = searchKnowledge("meal_log", 100);
+        const now = new Date();
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const dayNames = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
+        const meals = entries
+          .filter((e) => e.topic === "meal_log")
+          .filter((e) => {
+            const d = new Date(e.timestamp * 1000);
+            return d >= weekAgo && d <= now;
+          })
+          .map((e) => {
+            const d = new Date(e.timestamp * 1000);
+            const match = e.insight.match(/^\[(.+?)\]\s+(.+?)\s+—\s+(\d+)\s+г/);
+            if (!match) return null;
+            return {
+              name: match[2],
+              grams: parseInt(match[3]),
+              mealType: match[1],
+              day: `${dayNames[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}`,
+            };
+          })
+          .filter((m): m is NonNullable<typeof m> => m !== null);
+
+        return { success: true, output: generateWeeklySummary(meals) };
       }
 
       default:

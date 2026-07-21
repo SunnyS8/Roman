@@ -3,6 +3,7 @@ import {
   addKnowledge,
   searchKnowledge,
   getAllKnowledge,
+  deleteKnowledgeByTopic,
   type KnowledgeRow,
 } from "../memory/knowledge.js";
 import { getDB } from "../memory/db.js";
@@ -59,6 +60,12 @@ function handleDelete(params: Record<string, unknown>): ToolResult {
   return { success: true, output: `Deleted entry ${id}.` };
 }
 
+function handleClearTopic(params: Record<string, unknown>): ToolResult {
+  const topic = requireString(params, "topic");
+  const count = deleteKnowledgeByTopic(topic);
+  return { success: true, output: `Удалено ${count} записей по теме "${topic}".` };
+}
+
 function handleList(): ToolResult {
   const entries = getAllKnowledge();
   if (entries.length === 0) {
@@ -84,12 +91,13 @@ export const memoryTool: Tool = {
     "Search, save, delete, or list entries in the knowledge base. " +
     "Use action=search with a query to find relevant past knowledge, " +
     "action=save to add new knowledge, action=delete to remove an entry, " +
-    "or action=list to see all entries.",
+    "action=list to see all entries, " +
+    "or action=clear_topic to delete ALL entries with a given topic.",
   parameters: [
-    { name: "action", type: "string", description: "One of: search, save, delete, list", required: true },
+    { name: "action", type: "string", description: "One of: search, save, delete, list, clear_topic", required: true },
     { name: "query", type: "string", description: "Search query (required for action=search)" },
     { name: "content", type: "string", description: "Knowledge content to save (required for action=save)" },
-    { name: "topic", type: "string", description: "Topic tag for the entry (optional, default: general)" },
+    { name: "topic", type: "string", description: "Topic tag (optional for save, required for clear_topic)" },
     { name: "id", type: "string", description: "Entry ID (required for action=delete)" },
     { name: "limit", type: "number", description: "Max results for search (default 5)" },
   ],
@@ -106,10 +114,12 @@ export const memoryTool: Tool = {
         return handleDelete(params);
       case "list":
         return handleList();
+      case "clear_topic":
+        return handleClearTopic(params);
       default:
         return {
           success: false,
-          output: `Unknown action: ${action}. Use search, save, delete, or list.`,
+          output: `Unknown action: ${action}. Use search, save, delete, list, or clear_topic.`,
           error: "invalid_action",
         };
     }

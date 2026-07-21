@@ -25,6 +25,7 @@ import { memoryTool } from "./core/tools/memory.js";
 import { selfConfigTool } from "./core/tools/self-config.js";
 import { SchedulerService } from "./core/tools/scheduler.js";
 import { SchedulerStore } from "./core/tools/scheduler-store.js";
+import { SubscriptionStore } from "./core/subscription-store.js";
 import { getDB } from "./core/memory/db.js";
 import type { Channel } from "./channels/types.js";
 import { sshTool } from "./core/tools/ssh.js";
@@ -35,7 +36,9 @@ import { SkillSearchTool } from "./core/tools/skill-search.js";
 import { SkillInstallTool } from "./core/tools/skill-install.js";
 import { SendFileTool } from "./core/tools/send-file.js";
 import { ConnectServiceTool } from "./core/tools/connect-service.js";
+import { MemeTool } from "./core/tools/meme.js";
 import { foodAnalysisTool } from "./core/tools/food-analysis.js";
+import { seedKnowledge } from "./core/knowledge-seed.js";
 import { pickEntry } from "./mode.js";
 
 function getAddress(): string {
@@ -164,6 +167,9 @@ async function main() {
     tools.register(new SkillSearchTool({ apiKey: skillsmpKey }));
     tools.register(new SkillInstallTool({ apiKey: llmApiKey ?? undefined }));
   }
+  // Meme tool — random memes from the internet
+  tools.register(new MemeTool());
+
   // Food analysis tool — health coach feature
   tools.register(foodAnalysisTool);
 
@@ -173,6 +179,13 @@ async function main() {
     tools.register(new WebTool({ apiKey: googleConfig.api_key, cx: googleConfig.cx }));
   }
   console.log(`🔧 Зарегистрировано инструментов: ${tools.list().length}`);
+
+  // Seed knowledge base with psychology data from Академия Роста
+  seedKnowledge();
+
+  // Setup subscription store (must be before Engine)
+  const subscriptionStore = new SubscriptionStore(getDB());
+  subscriptionStore.init();
 
   // Setup Engine with personality and tools
   const personality = getPersonality(config);
@@ -192,6 +205,7 @@ async function main() {
     tools,
     contextBudget: config.memory?.context_budget ?? 40000,
     encryptionKey: passwordHash,
+    subscriptionStore,
   }) : null;
 
   // Start HTTP server
@@ -202,6 +216,7 @@ async function main() {
   if (config.telegram?.token) {
     try {
       telegram = new TelegramChannel();
+      telegram.subscriptionStore = subscriptionStore;
       telegram.onOwnerClaimed = (chatId) => {
         config.telegram!.owner_id = chatId;
         saveConfig(config);
@@ -286,6 +301,31 @@ async function main() {
     await scheduler.recoverMissed();
     scheduler.start();
     console.log("✅ Планировщик запущен");
+
+    // --- Daily food report at 21:00 MSK ---
+    if (telegram && config.telegram?.owner_id) {
+      const existingTasks = schedulerStore.list();
+      const hasDailyReport = existingTasks.some((t) => t.name === "daily_food_report");
+      if (!hasDailyReport) {
+        const { randomUUID } = await import("node:crypto");
+        const { nextCronRun } = await import("./core/tools/scheduler.js");
+        const now = Date.now();
+        const cronExpr = "0 21 * * *";
+        schedulerStore.add({
+          id: randomUUID(),
+          name: "daily_food_report",
+          schedule: JSON.stringify({ kind: "cron", expr: cronExpr }),
+          command: "Запроси дневную сводку по питанию через food_analysis (daily_summary) и отправь владельцу дружеское сообщение с результатами. Также проверь, не накопилось ли записей за неделю — если да, то сделай weekly_report.",
+          context: "",
+          channel: "telegram",
+          chatId: String(config.telegram.owner_id),
+          nextRunAt: nextCronRun(cronExpr, now),
+          lastRunAt: null,
+          createdAt: now,
+        });
+        console.log("📅 Ежедневный отчёт по питанию запланирован на 21:00");
+      }
+    }
   }
 
   // Auto-open browser on local machine
