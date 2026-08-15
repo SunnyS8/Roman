@@ -82,6 +82,7 @@ const configSchema = z.object({
     token: z.string(),
     streaming: z.boolean().optional(),
     owner_id: z.number().optional(),
+    public_mode: z.boolean().optional(),
   }).optional(),
 
   channels: z.record(z.string(), z.any()).optional(),

@@ -37,7 +37,7 @@ export class TelegramChannel implements Channel {
     this.bot = new Bot(config.token as string);
     this.bot.api.config.use(autoRetry());
     this.ownerChatId = config.owner_chat_id ? parseInt(config.owner_chat_id as string, 10) : null;
-    this.publicMode = config.public_mode === "true";
+    this.publicMode = String(config.public_mode) === "true";
 
     if (!this.handler) {
       throw new Error("TelegramChannel: call onMessage() before start()");
