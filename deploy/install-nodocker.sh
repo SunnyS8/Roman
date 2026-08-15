@@ -23,7 +23,19 @@ fi
 # edge-tts CLI for voice replies
 pip3 install --break-system-packages edge-tts || pip3 install edge-tts
 
-# 2. Source code
+# 2. Swap (only if RAM is small — protects npm build from OOM)
+if [ "$(free -m | awk '/^Mem:/{print $2}')" -lt 2048 ] && [ ! -f /swapfile ]; then
+  echo "==> Adding 2G swap (low RAM)..."
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  sysctl -w vm.swappiness=10
+  grep -q 'vm.swappiness' /etc/sysctl.conf || echo 'vm.swappiness=10' >> /etc/sysctl.conf
+fi
+
+# 3. Source code
 if [ ! -d "$APP_DIR/.git" ]; then
   git clone "$REPO_URL" "$APP_DIR"
 else
@@ -31,14 +43,14 @@ else
 fi
 cd "$APP_DIR"
 
-# 3. Build
+# 4. Build
 npm ci
 npm run build
 
-# 4. Data dir (config.yaml + betsy.db)
+# 5. Data dir (config.yaml + betsy.db)
 mkdir -p "$DATA_DIR"
 
-# 5. systemd unit
+# 6. systemd unit
 cp deploy/betsy.service /etc/systemd/system/betsy.service
 systemctl daemon-reload
 systemctl enable betsy
