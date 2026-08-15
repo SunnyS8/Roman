@@ -4,6 +4,7 @@ import type { MessageHandler } from "../types.js";
 import { sendVoiceResponse } from "./voice.js";
 import { sendVideoNoteHubris } from "./hubris-video.js";
 import { SubscriptionStore } from "../../core/subscription-store.js";
+import { getUserGender, setUserGender } from "../../core/memory/conversations.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -389,29 +390,45 @@ export function registerHandlers(
   videoConfig?: Record<string, unknown>,
   apiKey?: string,
   subscriptionStore?: SubscriptionStore,
+  publicMode?: boolean,
 ): void {
-  // --- Owner tracking (admin) + subscription check ---
+  // --- Owner tracking (admin) + subscription/limit check ---
   let currentOwner = ownerChatId;
 
   bot.use(async (ctx, next) => {
     const chatId = ctx.chat?.id;
     if (!chatId) return next();
 
-    // First user claims ownership when no owner is configured.
-    if (currentOwner === null) {
+    // First user claims ownership when no owner is configured (private mode only).
+    if (!publicMode && currentOwner === null) {
       currentOwner = chatId;
       onOwnerClaimed?.(chatId);
       console.log(`🔒 Владелец бота установлен: ${chatId}`);
     }
 
-    // Subscription check — only owner allowed
-    if (subscriptionStore && chatId !== currentOwner) {
+    if (publicMode) {
+      // Public mode: enforce subscription tiers and daily message limits.
+      if (subscriptionStore) {
+        subscriptionStore.getOrCreateSubscription(String(chatId), "telegram");
+        if (subscriptionStore.isOverDailyLimit(String(chatId), "telegram")) {
+          await ctx.reply("Сегодня лимит сообщений исчерпан (20). Возвращайся завтра! 🌙");
+          console.log(`⛔ Лимит исчерпан для пользователя: ${chatId}`);
+          return;
+        }
+      }
+    } else if (subscriptionStore && chatId !== currentOwner) {
+      // Private mode — only owner allowed
       await ctx.reply("Извини, бот сейчас в приватном режиме. Только для владельца.");
       console.log(`🚫 Заблокирован сторонний пользователь: ${chatId}`);
       return;
     }
 
     await next();
+
+    // Count the processed message toward the daily usage (public mode only).
+    if (publicMode && subscriptionStore && ctx.message) {
+      subscriptionStore.incrementDailyUsage(String(chatId), "telegram");
+    }
   });
 
   /** Handle message with typing indicator and tool progress. */
@@ -472,7 +489,43 @@ export function registerHandlers(
   }
 
   // /start
-  bot.command("start", (ctx) => handleWithTyping(ctx, "/start"));
+  bot.command("start", async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (publicMode && chatId && !getUserGender(chatId)) {
+      await ctx.reply(
+        "Привет! Я твой персональный помощник по здоровью — тренировки, питание, поддержка.\n\n" +
+          "Кем тебе удобнее со мной общаться — выбери 👨 или 👩",
+        {
+          reply_markup: {
+            inline_keyboard: [
+              [
+                { text: "👨 Тренер-мужчина", callback_data: "gender:male" },
+                { text: "👩 Тренер-женщина", callback_data: "gender:female" },
+              ],
+            ],
+          },
+        },
+      );
+      return;
+    }
+    await handleWithTyping(ctx, "/start");
+  });
+
+  // Gender choice callback
+  bot.on("callback_query:data", async (ctx) => {
+    const data = ctx.callbackQuery.data;
+    if (!data?.startsWith("gender:")) return;
+    const gender = data.split(":")[1];
+    const chatId = String(ctx.chat?.id ?? "");
+    if (gender !== "male" && gender !== "female") return;
+    setUserGender(chatId, gender);
+    await ctx.answerCallbackQuery();
+    await ctx.reply(
+      gender === "male"
+        ? "Отлично! Я — твой персональный тренер 👨\n\nНапиши мне — составим план тренировок, разберём питание или просто поболтаем."
+        : "Отлично! Я — твой персональный тренер 👩\n\nНапиши мне — составим план тренировок, разберём питание или просто поболтаем.",
+    );
+  });
   // /status
   bot.command("status", (ctx) => handleWithTyping(ctx, "/status"));
   // /help

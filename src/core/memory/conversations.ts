@@ -203,3 +203,26 @@ export function loadSummary(
     updatedAt: row.updated_at,
   };
 }
+
+/**
+ * Returns the saved gender for a user profile, or null if not chosen yet.
+ */
+export function getUserGender(userId: string): "male" | "female" | null {
+  const db = getDB();
+  const row = db
+    .prepare("SELECT gender FROM user_profiles WHERE user_id = ?")
+    .get(userId) as { gender: string | null } | undefined;
+  const gender = row?.gender;
+  return gender === "male" || gender === "female" ? gender : null;
+}
+
+/**
+ * Saves (upserts) the chosen gender for a user profile.
+ */
+export function setUserGender(userId: string, gender: "male" | "female"): void {
+  const db = getDB();
+  db.prepare(
+    `INSERT INTO user_profiles (user_id, gender, created_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET gender = excluded.gender`,
+  ).run(userId, gender, Math.floor(Date.now() / 1000));
+}

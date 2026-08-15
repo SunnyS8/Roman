@@ -6,7 +6,8 @@ import fs from "node:fs";
 let db: Database.Database | null = null;
 let currentPath: string | null = null;
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".betsy", "betsy.db");
+const DEFAULT_DB_PATH =
+  process.env.BETSY_DB_PATH ?? path.join(os.homedir(), ".betsy", "betsy.db");
 
 /**
  * Get or create the SQLite database, initializing tables and FTS5 index.
@@ -69,6 +70,12 @@ export function getDB(dbPath?: string): Database.Database {
       fact TEXT NOT NULL,
       source TEXT NOT NULL DEFAULT '',
       timestamp INTEGER NOT NULL DEFAULT (unixepoch())
+    );
+
+    CREATE TABLE IF NOT EXISTS user_profiles (
+      user_id TEXT PRIMARY KEY,
+      gender TEXT,
+      created_at INTEGER NOT NULL DEFAULT (unixepoch())
     );
 
     CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts

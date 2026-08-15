@@ -4,7 +4,7 @@ import type { ToolRegistry } from "./tools/registry.js";
 import type { ToolResult } from "./tools/types.js";
 import { buildSystemPrompt, type PromptConfig } from "./prompt.js";
 import { searchKnowledge } from "./memory/knowledge.js";
-import { saveMessage, loadHistory, extractText, loadUserFacts, saveUserFact } from "./memory/conversations.js";
+import { saveMessage, loadHistory, extractText, loadUserFacts, saveUserFact, getUserGender } from "./memory/conversations.js";
 import { compactHistory, shouldCompact } from "./memory/compaction.js";
 import { LLMUnavailableError } from "./llm/router.js";
 import { TokenStore } from "../services/tokens.js";
@@ -447,7 +447,13 @@ export class Engine {
       } catch {}
     }
 
-    let prompt = buildSystemPrompt(this.deps.config, userMessage, chatId, connectedServiceNames);
+    // Per-user gender overrides the instance-level default (public trainer mode)
+    const profileGender = getUserGender(chatId);
+    const configForUser: PromptConfig = profileGender
+      ? { ...this.deps.config, gender: profileGender }
+      : this.deps.config;
+
+    let prompt = buildSystemPrompt(configForUser, userMessage, chatId, connectedServiceNames);
 
     // Search knowledge base for context relevant to the user's message
     try {

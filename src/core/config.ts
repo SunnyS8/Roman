@@ -56,6 +56,7 @@ const configSchema = z.object({
   agent: z.object({
     name: z.string().default("Betsy"),
     gender: z.enum(["female", "male"]).default("female"),
+    biography: z.string().optional(),
     personality: personalitySchema,
   }).default({ name: "Betsy" }),
 
@@ -129,6 +130,7 @@ function normalizeConfig(raw: Record<string, unknown>): Record<string, unknown> 
   out.agent = {
     name: raw.name ?? "Betsy",
     gender: raw.gender ?? "female",
+    biography: raw.biography,
     personality: {
       tone: raw.tone,
       style: raw.style,

@@ -18,6 +18,7 @@ export class TelegramChannel implements Channel {
   private bot: Bot | null = null;
   private handler: MessageHandler | null = null;
   private ownerChatId: number | null = null;
+  private publicMode: boolean = false;
   private _avatarUrl: string | null = null;
   private _onSetReferencePhoto: SetReferencePhotoFn | undefined;
   private _onOwnerClaimed: OnOwnerClaimedFn | undefined;
@@ -36,6 +37,7 @@ export class TelegramChannel implements Channel {
     this.bot = new Bot(config.token as string);
     this.bot.api.config.use(autoRetry());
     this.ownerChatId = config.owner_chat_id ? parseInt(config.owner_chat_id as string, 10) : null;
+    this.publicMode = config.public_mode === "true";
 
     if (!this.handler) {
       throw new Error("TelegramChannel: call onMessage() before start()");
@@ -60,7 +62,7 @@ export class TelegramChannel implements Channel {
     console.log(`🎙️ Voice config:`, voiceConfig);
     console.log(`🎬 Video config:`, videoConfig);
     console.log(`🔑 LLM API key:`, llmApiKey ? `${llmApiKey.slice(0, 8)}...` : "not set");
-    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed, voiceConfig, videoConfig, llmApiKey, this.subscriptionStore ?? undefined);
+    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed, voiceConfig, videoConfig, llmApiKey, this.subscriptionStore ?? undefined, this.publicMode);
     this.bot.catch((err) => console.error("❌ Telegram polling error:", err));
 
     // Start polling (fire-and-forget, start() never completes)

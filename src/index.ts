@@ -108,17 +108,22 @@ async function main() {
   const schedulerStore = new SchedulerStore(schedulerDb);
   schedulerStore.init();
   const scheduler = new SchedulerService(schedulerStore);
-  tools.register(new ShellTool());
+  const securityTools = (config.security?.tools ?? {}) as Record<string, boolean>;
+  const shellEnabled = securityTools.shell !== false;
+  const sshEnabled = securityTools.ssh === true;
+  const browserEnabled = securityTools.browser !== false;
+  const npmInstallEnabled = securityTools.npm_install !== false;
+  if (shellEnabled) tools.register(new ShellTool());
   tools.register(new SendFileTool());
   tools.register(new FilesTool());
   const passwordHash = config.security?.password_hash ?? "default-key-change-me";
   tools.register(new HttpTool({ encryptionKey: passwordHash }));
-  tools.register(new BrowserTool());
+  if (browserEnabled) tools.register(new BrowserTool());
   tools.register(memoryTool);
   tools.register(selfConfigTool);
   tools.register(scheduler.tool);
-  tools.register(sshTool);
-  tools.register(npmInstallTool);
+  if (sshEnabled) tools.register(sshTool);
+  if (npmInstallEnabled) tools.register(npmInstallTool);
   // channels map is populated later — closure captures the reference
   const channels = new Map<string, Channel>();
   tools.register(new ConnectServiceTool({
@@ -195,6 +200,7 @@ async function main() {
     config: {
       name,
       gender: config.agent?.gender ?? "female",
+      biography: config.agent?.biography,
       personality: {
         tone: personality.tone,
         responseStyle: personality.style,
@@ -242,6 +248,7 @@ async function main() {
       await telegram.start({
         token: config.telegram.token,
         owner_chat_id: config.telegram.owner_id?.toString() ?? "",
+        public_mode: (config as any).telegram?.public_mode ?? false,
         voice: (config as any).channels?.telegram?.voice,
         video: (config as any).channels?.telegram?.video,
         api_key: getLLMApiKey(config) ?? "",
