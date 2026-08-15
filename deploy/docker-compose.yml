@@ -1,0 +1,13 @@
+services:
+  betsy:
+    build: ..
+    container_name: betsy
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Moscow
+    volumes:
+      - /root/.betsy:/root/.betsy
+    ports:
+      - "3777:3777"
+    # No public port needed for Telegram (long polling). 3777 is the web UI —
+    # comment out if you don't use the browser chat.

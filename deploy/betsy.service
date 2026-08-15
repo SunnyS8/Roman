@@ -1,0 +1,21 @@
+[Unit]
+Description=Roman (Betsy) Telegram bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/roman
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+Environment=TZ=Europe/Moscow
+# edge-tts needs a writable temp dir and PATH to the pip-installed CLI
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+# Logs go to journalctl -u betsy
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

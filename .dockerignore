@@ -1,8 +1,9 @@
 node_modules
-src
+dist
 test
 docs
 .git
 .claude
 *.md
 !README.md
+scripts/__pycache__

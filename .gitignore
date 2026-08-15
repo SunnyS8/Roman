@@ -25,3 +25,6 @@ betsy-app/release/
 betsy-app/node_modules/
 betsy-app/test-results/
 betsy-app/playwright-report/
+
+# Server config with real keys — never commit
+deploy/config.server.yaml
