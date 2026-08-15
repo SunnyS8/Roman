@@ -2,6 +2,9 @@ $logFile = "$env:USERPROFILE\.betsy\bot.log"
 $errFile = "$env:USERPROFILE\.betsy\bot-error.log"
 $botDir = "C:\Users\Александра\Desktop\Лапа-Рома\Betsy"
 
+# Fix Cyrillic garble in redirected console output (cp866 → utf8)
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
+
 Set-Location -LiteralPath $botDir
 $n = 0
 
