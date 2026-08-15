@@ -56,6 +56,37 @@ interface ConversationRow {
 }
 
 /**
+ * Counts messages stored for a user, optionally only those newer than a timestamp.
+ */
+export function countMessages(userId: string, since?: number): number {
+  const db = getDB();
+  const row = since !== undefined
+    ? db.prepare("SELECT COUNT(*) as count FROM conversations WHERE user_id = ? AND timestamp > ?").get(userId, since)
+    : db.prepare("SELECT COUNT(*) as count FROM conversations WHERE user_id = ?").get(userId);
+  return (row as { count: number }).count;
+}
+
+/**
+ * Saves a durable fact about a user into the user_facts table.
+ */
+export function saveUserFact(userId: string, fact: string, source = "memory_tool"): void {
+  const db = getDB();
+  db.prepare(
+    "INSERT INTO user_facts (user_id, fact, source, timestamp) VALUES (?, ?, ?, ?)",
+  ).run(userId, fact.trim(), source, Math.floor(Date.now() / 1000));
+}
+
+/**
+ * Loads the most recent durable facts about a user, newest first.
+ */
+export function loadUserFacts(userId: string, limit = 15): Array<{ fact: string; timestamp: number }> {
+  const db = getDB();
+  return db.prepare(
+    "SELECT fact, timestamp FROM user_facts WHERE user_id = ? ORDER BY timestamp DESC, id DESC LIMIT ?",
+  ).all(userId, limit) as Array<{ fact: string; timestamp: number }>;
+}
+
+/**
  * Loads the last N messages for a user, with boundary trimming, and the summary if any.
  */
 export function loadHistory(
@@ -158,7 +189,7 @@ export function saveSummary(userId: string, summary: string, tokenEstimate: numb
  */
 export function loadSummary(
   userId: string,
-): { summary: string; tokenEstimate: number } | null {
+): { summary: string; tokenEstimate: number; updatedAt: number } | null {
   const db = getDB();
   const row = db
     .prepare("SELECT * FROM conversation_summaries WHERE user_id = ?")
@@ -169,5 +200,6 @@ export function loadSummary(
   return {
     summary: row.summary,
     tokenEstimate: row.token_estimate,
+    updatedAt: row.updated_at,
   };
 }

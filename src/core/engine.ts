@@ -4,8 +4,8 @@ import type { ToolRegistry } from "./tools/registry.js";
 import type { ToolResult } from "./tools/types.js";
 import { buildSystemPrompt, type PromptConfig } from "./prompt.js";
 import { searchKnowledge } from "./memory/knowledge.js";
-import { saveMessage, loadHistory, extractText } from "./memory/conversations.js";
-import { compactHistory } from "./memory/compaction.js";
+import { saveMessage, loadHistory, extractText, loadUserFacts, saveUserFact } from "./memory/conversations.js";
+import { compactHistory, shouldCompact } from "./memory/compaction.js";
 import { LLMUnavailableError } from "./llm/router.js";
 import { TokenStore } from "../services/tokens.js";
 import { getService } from "../services/catalog.js";
@@ -89,6 +89,12 @@ export class Engine {
       await pending;
     }
 
+    // Message-count compaction: summarize once enough new messages accumulate
+    if (shouldCompact(userId)) {
+      console.log(JSON.stringify({ tag: "engine:compaction", userId, reason: "message_threshold" }));
+      await this.startCompactionAsync(userId);
+    }
+
     // Get or create history for this user
     if (!this.histories.has(userId)) {
       this.hydrateUser(userId);
@@ -111,20 +117,30 @@ export class Engine {
       ? `[В ответ на сообщение: "${replyTo}"]\n\n${msg.text}`
       : msg.text;
 
-    if (msg.images?.length) {
-      const parts: ContentPart[] = [
-        { type: "text", text: textContent },
-        ...msg.images.map((b64): ContentPart => ({
-          type: "image_url",
-          image_url: { url: `data:image/jpeg;base64,${b64}` },
-        })),
-      ];
-      history.push({ role: "user", content: parts });
-    } else {
-      history.push({ role: "user", content: textContent });
-    }
+    // Scheduled-task triggers are not real user messages: keep them out of
+    // the conversation window and the DB so they don't crowd out the dialog.
+    // The task text still reaches the LLM via the system prompt ("Текущий запрос").
+    const isScheduledTask = msg.metadata?.scheduledTask === true;
 
-    saveMessage(userId, msg.channelName, "user", textContent);
+    if (!isScheduledTask) {
+      if (msg.images?.length) {
+        const parts: ContentPart[] = [
+          { type: "text", text: textContent },
+          ...msg.images.map((b64): ContentPart => ({
+            type: "image_url",
+            image_url: { url: `data:image/jpeg;base64,${b64}` },
+          })),
+        ];
+        history.push({ role: "user", content: parts });
+      } else {
+        history.push({ role: "user", content: textContent });
+      }
+
+      saveMessage(userId, msg.channelName, "user", textContent);
+
+      // Auto-capture durable facts from "запомни …" style requests
+      this.captureRememberRequest(userId, textContent);
+    }
 
     // Build tool definitions for the LLM (filtered by subscription tier)
     const tools = this.buildToolDefinitions(userId);
@@ -202,7 +218,52 @@ export class Engine {
 
         // If LLM didn't request tools, return the text response
         if (response.stopReason !== "tool_use" || !response.toolCalls?.length) {
-          const text = response.text || "...";
+          let text = response.text || "...";
+
+          // Auto-call tool when LLM outputs [Selfie] / [Image] / [Картинка] placeholder,
+          // OR the user (or recent history) asked for a selfie/photo but the LLM replied with text.
+          const placeholderRE = /\[Selfie\]|\[Image\]|\[Картинка\]|\[Изображение\]/i;
+          const userReq = (msg.text || "").toLowerCase();
+
+          const asksSelfie = /\bселфи\b/.test(userReq) || /прислать\s+тебя|покажи\s+себя|покажи\s+меня|фото\s+себя|фото\s+тебя|сфотограф/.test(userReq);
+          const asksPhoto = /(пришли|сделай|сгенерируй|отправь|сфотограф|нарисуй)\s+(фото|фотку|фотографию|картинку|изображение)/i.test(userReq);
+
+          // Detect role-breaking refusals like "я не умею", "я всего лишь программа", "я не настоящий человек"
+          const refusalRE = /не\s+(могу|умею)|не\s+настоящий\s+человек|всего\s+лишь\s+программа|только\s+(картинки|изображения)|сгенерированные\s+изображения|я\s+(же\s+)?(бот|программа|нейросеть|искусственный)/i;
+          const isRefusal = refusalRE.test(text);
+
+          // If user says "ещё раз/повтори/попробуй" or the LLM refused, scan history
+          // for the most recent media request to use as context.
+          const continuation = /попробуй|ещё\s+раз|еще\s+раз|повтори|опять|снова|давай\s+сам/.test(userReq);
+          let historyMediaReq: string | null = null;
+          if (continuation || isRefusal) {
+            const mediaReqRE = /\bселфи\b|прислать\s+тебя|покажи\s+себя|покажи\s+меня|фото\s+себя|фото\s+тебя|сфотограф|пришли\s+(меня|тебя|свое|своё)|(пришли|сделай|отправь|сгенерируй|нарисуй).{0,20}(селфи|фото|фотку|фотографию|картинку|изображение)|картинк/i;
+            for (let i = history.length - 1; i >= 0; i--) {
+              const m = history[i];
+              if (m.role === "user" && typeof m.content === "string" && mediaReqRE.test(m.content)) {
+                historyMediaReq = m.content;
+                break;
+              }
+            }
+          }
+
+          const shouldGenerate = placeholderRE.test(text) || asksSelfie || asksPhoto || (isRefusal && (asksSelfie || asksPhoto || historyMediaReq));
+          if (shouldGenerate) {
+            const context = historyMediaReq ?? msg.text ?? "";
+            const useSelfie = asksSelfie || /\bселфи\b/i.test(context) || /selfie/i.test(text);
+            const result = useSelfie
+              ? await this.executeTool("selfie", { context }, userId)
+              : await this.executeTool("image_gen", { prompt: context }, userId);
+
+            text = text.replace(/<center>\s*\[(Selfie|Image|Картинка|Изображение)\]\s*<\/center>|\[(Selfie|Image|Картинка|Изображение)\]/gi, "").trim();
+
+            if (result.success && result.mediaUrl) {
+              lastMediaUrl = result.mediaUrl;
+            } else {
+              console.log(`🔧 fallback tool ${useSelfie ? "selfie" : "image_gen"} failed: ${result.error || "no media"}`);
+            }
+          }
+
           history.push({ role: "assistant", content: text });
           saveMessage(userId, msg.channelName, "assistant", text);
 
@@ -357,6 +418,21 @@ export class Engine {
     }
   }
 
+  /** Detect "запомни …" requests and persist them as durable user facts. */
+  private captureRememberRequest(userId: string, text: string): void {
+    if (!text) return;
+    const match = text.match(/^\s*(?:запомни|запомнить|запомнишь|не забудь|не забывай|записать|запиши)\s*[:,]?\s*(.+)/i);
+    if (!match) return;
+    const fact = match[1].trim().replace(/[.!]+$/g, "").trim();
+    if (!fact) return;
+    try {
+      saveUserFact(userId, fact, "auto_capture");
+      console.log(JSON.stringify({ tag: "engine:remember", userId, fact: fact.slice(0, 120) }));
+    } catch (err) {
+      console.error("Failed to save user fact:", err);
+    }
+  }
+
   /** Build system prompt and inject relevant memory context. */
   private buildPromptWithMemory(userMessage: string, chatId: string): string {
     let connectedServiceNames: string[] = [];
@@ -381,6 +457,19 @@ export class Engine {
           .map((h, i) => `${i + 1}. [${h.topic}] ${h.insight}`)
           .join("\n");
         prompt += `\n\n## Релевантные знания из памяти\n\n${memoryContext}`;
+      }
+    } catch {
+      // Memory not initialized yet — skip
+    }
+
+    // Inject durable facts about this specific user
+    try {
+      const facts = loadUserFacts(chatId, 15);
+      if (facts.length > 0) {
+        const factContext = facts
+          .map((f, i) => `${i + 1}. ${f.fact}`)
+          .join("\n");
+        prompt += `\n\n## Факты о пользователе\n\n${factContext}\n\nЭти факты о человеке — важны. Учитывай их в разговоре и напоминаниях.`;
       }
     } catch {
       // Memory not initialized yet — skip
@@ -419,6 +508,13 @@ export class Engine {
       .catch(err => console.error("Compaction failed:", err))
       .finally(() => this.compactionInFlight.delete(userId));
     this.compactionInFlight.set(userId, promise);
+  }
+
+  /** Run compaction for a user and await its completion (deduplicates concurrent calls). */
+  private async startCompactionAsync(userId: string): Promise<void> {
+    this.startCompaction(userId);
+    const promise = this.compactionInFlight.get(userId);
+    if (promise) await promise;
   }
 
   /** Execute a single tool by name. Returns full ToolResult.

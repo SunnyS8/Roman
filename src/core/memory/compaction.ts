@@ -1,6 +1,19 @@
 import { getDB } from "./db.js";
-import { loadSummary, saveSummary } from "./conversations.js";
+import { loadSummary, saveSummary, countMessages } from "./conversations.js";
 import type { LLMClient } from "../llm/types.js";
+
+/** Trigger compaction once this many new messages accumulate after the last summary. */
+export const COMPACTION_MESSAGE_THRESHOLD = 80;
+
+/**
+ * Whether enough new messages have accumulated since the last summary
+ * to warrant a compaction run.
+ */
+export function shouldCompact(userId: string): boolean {
+  const summary = loadSummary(userId);
+  const since = summary?.updatedAt ?? 0;
+  return countMessages(userId, since) >= COMPACTION_MESSAGE_THRESHOLD;
+}
 
 interface CompactionRow {
   id: number;
@@ -13,9 +26,11 @@ export async function compactHistory(userId: string, llm: LLMClient): Promise<vo
   const db = getDB();
   const existing = loadSummary(userId);
 
+  // Only compact messages newer than the last summary; older ones are already covered.
+  const since = existing?.updatedAt ?? 0;
   const allRows = db.prepare(
-    "SELECT id, role, content, tool_calls FROM conversations WHERE user_id = ? ORDER BY timestamp ASC, id ASC",
-  ).all(userId) as CompactionRow[];
+    "SELECT id, role, content, tool_calls FROM conversations WHERE user_id = ? AND timestamp > ? ORDER BY timestamp ASC, id ASC",
+  ).all(userId, since) as CompactionRow[];
 
   if (allRows.length < 4) return;
 

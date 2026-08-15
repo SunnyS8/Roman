@@ -7,6 +7,7 @@ import {
   type KnowledgeRow,
 } from "../memory/knowledge.js";
 import { getDB } from "../memory/db.js";
+import { saveUserFact, loadUserFacts } from "../memory/conversations.js";
 
 function requireString(
   params: Record<string, unknown>,
@@ -47,7 +48,30 @@ function handleSave(params: Record<string, unknown>): ToolResult {
       : "general";
 
   addKnowledge({ topic, insight, source: "memory_tool" });
+
+  // Also persist as a durable per-user fact so it survives compaction.
+  const userId = typeof params._userId === "string" ? params._userId : undefined;
+  if (userId) {
+    saveUserFact(userId, insight, "memory_tool");
+  }
   return { success: true, output: "Saved knowledge entry." };
+}
+
+function handleFacts(params: Record<string, unknown>): ToolResult {
+  const userId = typeof params._userId === "string" ? params._userId : undefined;
+  if (!userId) {
+    return { success: false, output: "No user context.", error: "missing_user" };
+  }
+  const limit =
+    typeof params.limit === "number" && params.limit > 0 ? params.limit : 15;
+  const facts = loadUserFacts(userId, limit);
+  if (facts.length === 0) {
+    return { success: true, output: "No facts stored for this user." };
+  }
+  return {
+    success: true,
+    output: facts.map((f) => `- ${f.fact}`).join("\n"),
+  };
 }
 
 function handleDelete(params: Record<string, unknown>): ToolResult {
@@ -92,14 +116,15 @@ export const memoryTool: Tool = {
     "Use action=search with a query to find relevant past knowledge, " +
     "action=save to add new knowledge, action=delete to remove an entry, " +
     "action=list to see all entries, " +
+    "action=facts to list durable facts saved about the current user, " +
     "or action=clear_topic to delete ALL entries with a given topic.",
   parameters: [
-    { name: "action", type: "string", description: "One of: search, save, delete, list, clear_topic", required: true },
+    { name: "action", type: "string", description: "One of: search, save, delete, list, facts, clear_topic", required: true },
     { name: "query", type: "string", description: "Search query (required for action=search)" },
     { name: "content", type: "string", description: "Knowledge content to save (required for action=save)" },
     { name: "topic", type: "string", description: "Topic tag (optional for save, required for clear_topic)" },
     { name: "id", type: "string", description: "Entry ID (required for action=delete)" },
-    { name: "limit", type: "number", description: "Max results for search (default 5)" },
+    { name: "limit", type: "number", description: "Max results for search or facts (default 5/15)" },
   ],
 
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
@@ -114,12 +139,14 @@ export const memoryTool: Tool = {
         return handleDelete(params);
       case "list":
         return handleList();
+      case "facts":
+        return handleFacts(params);
       case "clear_topic":
         return handleClearTopic(params);
       default:
         return {
           success: false,
-          output: `Unknown action: ${action}. Use search, save, delete, list, or clear_topic.`,
+          output: `Unknown action: ${action}. Use search, save, delete, list, facts, or clear_topic.`,
           error: "invalid_action",
         };
     }
