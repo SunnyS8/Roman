@@ -58,7 +58,7 @@ async function main() {
     return;
   }
 
-  const port = 3777;
+  const port = process.env.BETSY_PORT ? parseInt(process.env.BETSY_PORT, 10) : 3777;
   const address = getAddress();
 
   const config = isConfigured() ? loadConfig() : null;
