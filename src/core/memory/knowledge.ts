@@ -24,26 +24,91 @@ export function addKnowledge(
   ).run(entry.topic, entry.insight, entry.source, confidence, Math.floor(Date.now() / 1000));
 }
 
+/** Words too common to be useful for matching. */
+const STOPWORDS = new Set([
+  "и", "в", "во", "не", "что", "я", "ты", "он", "она", "мы", "вы",
+  "на", "с", "со", "по", "за", "у", "для", "от", "до", "о", "об",
+  "как", "так", "это", "тот", "то", "все", "еще", "уже", "только",
+  "меня", "тебя", "мне", "тебе", "быть", "был", "была", "было",
+  "будет", "есть", "нет", "да", "а", "но", "или", "если", "чтобы",
+  "помнишь", "помни", "запомни", "запомнишь", "помнить", "скажи",
+  "давай", "хочу", "надо", "нужно", "можно", "очень", "просто",
+]);
+
+/** Split a free-form query into meaningful lowercase tokens (Cyrillic/Latin/digits only). */
+function tokenizeQuery(input: string): string[] {
+  const tokens = input
+    .toLowerCase()
+    .replace(/[^a-zа-яё0-9\s-]/gi, " ")
+    .split(/[\s-]+/)
+    .filter((w) => w.length >= 2 && !STOPWORDS.has(w));
+  return [...new Set(tokens)];
+}
+
+/** Build an FTS5-safe MATCH expression from tokens, or null if empty. */
+function buildFtsQuery(input: string): string | null {
+  const tokens = tokenizeQuery(input).slice(0, 8);
+  if (tokens.length === 0) return null;
+  return tokens.map((t) => `"${t}"`).join(" OR ");
+}
+
 /**
- * Full-text search across knowledge entries using FTS5.
- * Returns up to `limit` matching rows ordered by relevance.
+ * Full-text search across knowledge entries.
+ * First tries FTS5 with a sanitized token query, then falls back to a
+ * LIKE scan so that Russian word forms still match. Returns up to `limit`
+ * matching rows, deduplicated by id.
  */
 export function searchKnowledge(query: string, limit = 5): KnowledgeRow[] {
   if (!query.trim()) return [];
 
   const db = getDB();
-  const rows = db
-    .prepare(
-      `SELECT k.id, k.topic, k.insight, k.source, k.confidence, k.timestamp
-       FROM knowledge_fts fts
-       JOIN knowledge k ON k.id = fts.rowid
-       WHERE knowledge_fts MATCH ?
-       ORDER BY rank
-       LIMIT ?`,
-    )
-    .all(query, limit) as KnowledgeRow[];
+  const found: Map<number, KnowledgeRow> = new Map();
 
-  return rows;
+  const ftsQuery = buildFtsQuery(query);
+  if (ftsQuery) {
+    try {
+      const rows = db
+        .prepare(
+          `SELECT k.id, k.topic, k.insight, k.source, k.confidence, k.timestamp
+           FROM knowledge_fts fts
+           JOIN knowledge k ON k.id = fts.rowid
+           WHERE knowledge_fts MATCH ?
+           ORDER BY rank
+           LIMIT ?`,
+        )
+        .all(ftsQuery, limit * 2) as KnowledgeRow[];
+      for (const r of rows) {
+        if (!found.has(r.id)) found.set(r.id, r);
+      }
+    } catch {
+      // Malformed query — fall through to LIKE scan
+    }
+  }
+
+  // LIKE fallback: matches Russian word forms ("готовить"/"приготовить")
+  if (found.size < limit) {
+    const tokens = tokenizeQuery(query).slice(0, 8);
+    if (tokens.length > 0) {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      tokens.forEach((t) => {
+        conditions.push("(k.topic LIKE ? OR k.insight LIKE ?)");
+        params.push(`%${t}%`, `%${t}%`);
+      });
+      const likeSql = `SELECT k.id, k.topic, k.insight, k.source, k.confidence, k.timestamp
+         FROM knowledge k
+         WHERE ${conditions.join(" OR ")}
+         ORDER BY k.timestamp DESC
+         LIMIT ?`;
+      const rows = db.prepare(likeSql).all(...params, limit * 2) as KnowledgeRow[];
+      for (const r of rows) {
+        if (!found.has(r.id)) found.set(r.id, r);
+        if (found.size >= limit * 2) break;
+      }
+    }
+  }
+
+  return [...found.values()].slice(0, limit);
 }
 
 /**
