@@ -158,8 +158,9 @@ async function main() {
   tools.register(selfieTool);
   // Image generation tool — uses OpenRouter API key
   const llmApiKey = getLLMApiKey(config);
-  if (llmApiKey) {
-    tools.register(new ImageGenTool({ apiKey: llmApiKey }));
+  const imageGenTool = llmApiKey ? new ImageGenTool({ apiKey: llmApiKey, referencePhotoUrl: selfiesConfig?.reference_photo_url }) : null;
+  if (imageGenTool) {
+    tools.register(imageGenTool);
   }
   // SkillsMP tools — search and install agent skills
   const skillsmpKey = (config as any).skillsmp?.api_key as string | undefined;
@@ -224,6 +225,7 @@ async function main() {
       };
       telegram.onSetReferencePhoto = (photoPath) => {
         selfieTool.setReferencePhoto(photoPath);
+        imageGenTool?.setReferencePhoto(photoPath);
         console.log(`📸 Референсное фото обновлено: ${photoPath.slice(0, 60)}`);
       };
       telegram.onMessage(async (msg, onProgress) => {
@@ -246,15 +248,18 @@ async function main() {
       });
       // Load saved reference photo if exists and no URL in config
       const savedRef = path.join(os.homedir(), ".betsy", "reference.jpg");
-      if (!selfieTool.config.referencePhotoUrl && fs.existsSync(savedRef)) {
+      const refUrl = selfiesConfig?.reference_photo_url ?? null;
+      if (!refUrl && fs.existsSync(savedRef)) {
         selfieTool.setReferencePhoto(savedRef);
+        imageGenTool?.setReferencePhoto(savedRef);
         console.log("📸 Референсное фото загружено из ~/.betsy/reference.jpg");
-      } else if (!selfieTool.config.referencePhotoUrl) {
+      } else if (!refUrl) {
         // Try to load avatar from config
-        const videoConfig = config.video as Record<string, string> | undefined;
-        const configAvatar = videoConfig?.avatar_path;
+        const videoCfg = config.video as Record<string, string> | undefined;
+        const configAvatar = videoCfg?.avatar_path;
         if (configAvatar && fs.existsSync(configAvatar)) {
           selfieTool.setReferencePhoto(configAvatar);
+          imageGenTool?.setReferencePhoto(configAvatar);
           console.log(`📸 Используется аватар из конфига: ${configAvatar.slice(0, 60)}`);
         }
       }

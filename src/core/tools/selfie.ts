@@ -34,7 +34,7 @@ export interface SelfieToolConfig {
 export class SelfieTool implements Tool {
   name = "selfie";
   description =
-    "Сгенерировать и отправить селфи. Используй когда просят фото/селфи, или когда уместно показать как выглядишь.";
+    "Сгенерировать селфи с полным сохранением внешности из референсного фото. ВАЖНО: обязан вызвать этот tool когда пользователь просит селфи/фото/картинку/изображение/селфи тебя (Романа). НЕЛЬЗЯ просто описать словами или вставить [Selfie] — нужно реально сгенерировать через этот tool. Если просят изменить внешность (прическа, одежда) — передай это в context. Внешность (лицо, черты) сохраняется автоматически из референса.";
   parameters = [
     { name: "context", type: "string", description: "Описание ситуации (в кафе, в новом платье, на пляже)", required: true },
     { name: "mode", type: "string", description: "Режим: mirror (зеркальное, full-body) или direct (close-up). Если не указан — определяется автоматически.", required: false },
@@ -101,7 +101,7 @@ export class SelfieTool implements Tool {
         messages = [{
           role: "user",
           content: [
-            { type: "text", text: `Generate a selfie of this person. ${prompt}` },
+            { type: "text", text: `Generate a selfie PRESERVING THE EXACT FACE, IDENTITY, AND APPEARANCE of the person in the reference photo below. The face, facial features, hair, eyes, nose, mouth must be IDENTICAL to the reference. Only change the pose, clothing, background, lighting, or expression as described. CRITICAL: do not alter the person's identity or facial structure. Generate a photo that looks like the same person in a different situation.\n\n${prompt}` },
             { type: "image_url", image_url: { url: this.referenceBase64 } },
           ],
         }];

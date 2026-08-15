@@ -272,8 +272,10 @@ async function deliver(
         caption,
         parse_mode: caption ? "HTML" : undefined,
       });
+      console.log(`📸 Photo sent successfully (${buffer.length} bytes)`);
       return;
-    } catch {
+    } catch (err) {
+      console.error(`❌ replyWithPhoto failed: ${err instanceof Error ? err.message : err}`);
       // Fall through to text delivery
     }
   }
@@ -402,23 +404,11 @@ export function registerHandlers(
       console.log(`🔒 Владелец бота установлен: ${chatId}`);
     }
 
-    // Subscription check (skip for owner — always allowed)
+    // Subscription check — only owner allowed
     if (subscriptionStore && chatId !== currentOwner) {
-      const userId = String(chatId);
-      const existing = subscriptionStore.getSubscription(userId);
-      
-      if (!existing) {
-        // New user — create trial subscription
-        const sub = subscriptionStore.getOrCreateSubscription(userId);
-        const trialDays = subscriptionStore.getTrialDays();
-        const dayWord = trialDays === 1 ? "день" : "дня";
-        const welcomeMsg = `Привет! Я Роман. Буду рад поболтать, помочь с едой, настроением и привычками.\n\n🎁 У тебя бесплатный доступ на ${trialDays} ${dayWord} — всё включено! Приятного знакомства 😊`;
-        await ctx.reply(welcomeMsg);
-        console.log(`🆕 Новый пользователь: ${chatId}, триал ${trialDays} ${dayWord}`);
-      } else if (existing.tier === "free" && subscriptionStore.isOverDailyLimit(userId)) {
-        await ctx.reply("Привет! Лимит бесплатных сообщений на сегодня исчерпан. Завтра снова смогу помочь. Или оформи подписку, чтобы снять ограничения!");
-        return;
-      }
+      await ctx.reply("Извини, бот сейчас в приватном режиме. Только для владельца.");
+      console.log(`🚫 Заблокирован сторонний пользователь: ${chatId}`);
+      return;
     }
 
     await next();

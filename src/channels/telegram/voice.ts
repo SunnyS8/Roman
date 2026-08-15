@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { synthesizePiper } from "./piper-voice.js";
+import { synthesizePiper, synthesizeSilero } from "./piper-voice.js";
 
-/** Synthesize speech via local Piper TTS. */
+/** Synthesize speech via local TTS (edge-tts or Silero). */
 export async function synthesizeSpeech(
   text: string,
   voiceConfig: Record<string, unknown>,
@@ -11,14 +11,16 @@ export async function synthesizeSpeech(
 ): Promise<Buffer | null> {
   const provider = (voiceConfig.tts_provider as string) ?? "piper";
 
-  if (provider === "piper") {
-    const voiceId = (voiceConfig.voice_id as string) ?? "ru_RU-irina-medium";
-    console.log(`🎤 Synthesizing with Piper TTS (voice_id=${voiceId})`);
-    return synthesizePiper(text, voiceId);
+  if (provider === "silero") {
+    const speaker = (voiceConfig.silero_speaker as string) ?? "baya";
+    console.log(`🎤 Synthesizing with Silero TTS (speaker=${speaker})`);
+    return synthesizeSilero(text, speaker);
   }
 
-  console.error(`❌ Unknown TTS provider: ${provider}`);
-  return null;
+  // "piper" (and default) -> actually edge-tts
+  const voiceId = (voiceConfig.voice_id as string) ?? "ru-RU-DmitryNeural";
+  console.log(`🎤 Synthesizing with edge-tts (voice_id=${voiceId})`);
+  return synthesizePiper(text, voiceId);
 }
 
 /** Send a voice response through a grammY context. */
