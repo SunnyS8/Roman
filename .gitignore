@@ -28,3 +28,4 @@ betsy-app/playwright-report/
 
 # Server config with real keys — never commit
 deploy/config.server.yaml
+deploy/config.trainer.yaml

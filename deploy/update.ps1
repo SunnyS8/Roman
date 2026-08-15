@@ -27,7 +27,7 @@ if ($staged) {
 
 # 2. Pull + build + restart on server
 Write-Host "[2/3] Обновляю на сервере ($SERVER)..." -ForegroundColor Cyan
-$remote = "cd $APP_DIR; git pull --ff-only; npm install --no-audit --no-fund 2>&1 | tail -2; npm run build; sudo systemctl restart betsy"
+$remote = "cd $APP_DIR; git pull --ff-only; npm install --no-audit --no-fund 2>&1 | tail -2; npm run build; sudo systemctl restart betsy trainer"
 & ssh -i $SSH_KEY -o BatchMode=yes -o ConnectTimeout=20 $SERVER $remote
 
 if ($LASTEXITCODE -ne 0) {
@@ -36,9 +36,9 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # 3. Verify
-Write-Host "[3/3] Проверяю статус бота..." -ForegroundColor Cyan
+Write-Host "[3/3] Проверяю статус ботов..." -ForegroundColor Cyan
 Start-Sleep -Seconds 5
-& ssh -i $SSH_KEY -o BatchMode=yes $SERVER "systemctl is-active betsy; echo '---'; journalctl -u betsy --no-pager -n 5"
+& ssh -i $SSH_KEY -o BatchMode=yes $SERVER "systemctl is-active betsy trainer; echo '---betsy---'; journalctl -u betsy --no-pager -n 3; echo '---trainer---'; journalctl -u trainer --no-pager -n 3"
 
 Write-Host ""
-Write-Host "Готово! Роман обновлён." -ForegroundColor Green
+Write-Host "Готово! Роман и Тренер обновлены." -ForegroundColor Green
