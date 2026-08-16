@@ -55,6 +55,8 @@ const llmSchema = z.union([
 const configSchema = z.object({
   agent: z.object({
     name: z.string().default("Betsy"),
+    name_male: z.string().optional(),
+    name_female: z.string().optional(),
     gender: z.enum(["female", "male"]).default("female"),
     biography: z.string().optional(),
     personality: personalitySchema,

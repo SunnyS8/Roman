@@ -62,7 +62,7 @@ export class TelegramChannel implements Channel {
     console.log(`🎙️ Voice config:`, voiceConfig);
     console.log(`🎬 Video config:`, videoConfig);
     console.log(`🔑 LLM API key:`, llmApiKey ? `${llmApiKey.slice(0, 8)}...` : "not set");
-    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed, voiceConfig, videoConfig, llmApiKey, this.subscriptionStore ?? undefined, this.publicMode);
+    registerHandlers(this.bot, this.handler, this.ownerChatId, this._onSetReferencePhoto, this._onOwnerClaimed, voiceConfig, videoConfig, llmApiKey, this.subscriptionStore ?? undefined, this.publicMode, (config.public_trainer_names as { male?: string; female?: string } | undefined));
     this.bot.catch((err) => console.error("❌ Telegram polling error:", err));
 
     // Start polling (fire-and-forget, start() never completes)

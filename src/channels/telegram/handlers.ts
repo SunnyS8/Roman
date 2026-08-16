@@ -402,6 +402,7 @@ export function registerHandlers(
   apiKey?: string,
   subscriptionStore?: SubscriptionStore,
   publicMode?: boolean,
+  publicTrainerNames?: { male: string; female: string },
 ): void {
   // --- Owner tracking (admin) + subscription/limit check ---
   let currentOwner = ownerChatId;
@@ -546,9 +547,12 @@ export function registerHandlers(
 
     const firstName = ctx.from?.first_name ?? "";
     const greet = firstName ? `${firstName}, привет!` : "Привет!";
+    const trainerName = gender === "male"
+      ? publicTrainerNames?.male ?? "Сергей"
+      : publicTrainerNames?.female ?? "Марина";
     const who = gender === "male"
-      ? "Я — твой персональный тренер 👨"
-      : "Я — твой персональный тренер 👩";
+      ? `Я — ${trainerName}, твой персональный тренер 👨`
+      : `Я — ${trainerName}, твой персональный тренер 👩`;
 
     const capabilities = [
       "🏋️ Тренировки — составлю план для дома или зала, подскажу технику и прогресс",

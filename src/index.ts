@@ -207,6 +207,8 @@ async function main() {
     llm,
     config: {
       name,
+      nameMale: (config.agent as any)?.name_male,
+      nameFemale: (config.agent as any)?.name_female,
       gender: config.agent?.gender ?? "female",
       biography: config.agent?.biography,
       personality: {
@@ -261,6 +263,9 @@ async function main() {
         voice: (config as any).channels?.telegram?.voice,
         video: (config as any).channels?.telegram?.video,
         api_key: getLLMApiKey(config) ?? "",
+        public_trainer_names: publicMode
+          ? { male: (config.agent as any)?.name_male ?? "Сергей", female: (config.agent as any)?.name_female ?? "Марина" }
+          : undefined,
       });
       // Load saved reference photo if exists and no URL in config
       const savedRef = path.join(os.homedir(), ".betsy", "reference.jpg");

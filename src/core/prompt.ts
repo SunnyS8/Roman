@@ -2,6 +2,8 @@ import { buildPersonalityPrompt } from "./personality.js";
 
 export interface PromptConfig {
   name: string;
+  nameMale?: string;
+  nameFemale?: string;
   gender?: "female" | "male";
   biography?: string;
   personality?: {

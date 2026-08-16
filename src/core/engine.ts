@@ -53,6 +53,13 @@ export class Engine {
     this.deps = deps;
   }
 
+  /** Pick the trainer name based on the user's chosen gender. */
+  private pickName(gender: "male" | "female"): string {
+    if (gender === "male" && this.deps.config.nameMale) return this.deps.config.nameMale;
+    if (gender === "female" && this.deps.config.nameFemale) return this.deps.config.nameFemale;
+    return this.deps.config.name;
+  }
+
   private hydrateUser(userId: string): void {
     if (this.histories.has(userId)) return;
     const { messages, summary } = loadHistory(userId);
@@ -451,7 +458,7 @@ export class Engine {
     // Per-user gender overrides the instance-level default (public trainer mode)
     const profileGender = getUserGender(chatId);
     const configForUser: PromptConfig = profileGender
-      ? { ...this.deps.config, gender: profileGender }
+      ? { ...this.deps.config, gender: profileGender, name: this.pickName(profileGender) }
       : this.deps.config;
 
     let prompt = buildSystemPrompt(configForUser, userMessage, chatId, connectedServiceNames, {
