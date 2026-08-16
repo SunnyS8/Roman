@@ -11,6 +11,17 @@ import os from "node:os";
 
 /** Max Telegram message length. */
 const MAX_MSG_LEN = 4096;
+/** Warn the user when this many daily messages remain. */
+const WARN_THRESHOLD = 5;
+
+/** Pluralize the Russian word "сообщение" for a given count. */
+function pluralMsg(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "сообщение";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "сообщения";
+  return "сообщений";
+}
 
 // ---------------------------------------------------------------------------
 // Markdown → Telegram HTML (like OpenClaw's format.ts approach)
@@ -414,6 +425,18 @@ export function registerHandlers(
           await ctx.reply("Сегодня лимит сообщений исчерпан (20). Возвращайся завтра! 🌙");
           console.log(`⛔ Лимит исчерпан для пользователя: ${chatId}`);
           return;
+        }
+        // Warn softly when the user is close to the daily limit.
+        const tier = subscriptionStore.getSubscription(String(chatId), "telegram")?.tier ?? "free";
+        const limit = subscriptionStore.getDailyLimit(tier);
+        if (Number.isFinite(limit)) {
+          const today = new Date().toISOString().slice(0, 10);
+          const used = subscriptionStore.getDailyUsage(String(chatId), today, "telegram");
+          const remaining = limit - used;
+          if (remaining > 0 && remaining <= WARN_THRESHOLD) {
+            await ctx.reply(`⚠️ Осталось ${remaining} ${pluralMsg(remaining)} на сегодня (лимит ${limit} в день).`);
+            console.log(`⚠️ Предупреждение о лимите для пользователя: ${chatId} (осталось ${remaining})`);
+          }
         }
       }
     } else if (subscriptionStore && chatId !== currentOwner) {
