@@ -758,7 +758,11 @@ export function registerHandlers(
     }
 
     // Regular photo — send to LLM with caption as text
-    await handleWithTyping(ctx, caption || "Что на этом фото?");
+    // In public trainer mode, strongly instruct to analyze food immediately.
+    const foodInstruction = publicMode
+      ? "Я прислал(а) фото. ЕСЛИ на нём еда или продукты — ПЕРВЫМ ЖЕ ответом вызови food_analysis (action=analyze) и сразу назови калории, белки, жиры, углеводы, без вопросов и без описания. Уточняющие вопросы про готовку и рацион задавай ТОЛЬКО ПОСЛЕ цифр. Если на фото не еда — просто расскажи, что на нём."
+      : "Что на этом фото?";
+    await handleWithTyping(ctx, caption ? `${caption}\n\n${foodInstruction}` : foodInstruction);
   });
 
   // Plain text messages (including unregistered /commands — let LLM handle them)
