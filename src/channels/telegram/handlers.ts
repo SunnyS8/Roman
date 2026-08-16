@@ -548,8 +548,8 @@ export function registerHandlers(
     const firstName = ctx.from?.first_name ?? "";
     const greet = firstName ? `${firstName}, привет!` : "Привет!";
     const trainerName = gender === "male"
-      ? publicTrainerNames?.male ?? "Сергей"
-      : publicTrainerNames?.female ?? "Марина";
+      ? publicTrainerNames?.male ?? "Александр"
+      : publicTrainerNames?.female ?? "Александра";
     const who = gender === "male"
       ? `Я — ${trainerName}, твой персональный тренер 👨`
       : `Я — ${trainerName}, твой персональный тренер 👩`;

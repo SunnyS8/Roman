@@ -264,7 +264,7 @@ async function main() {
         video: (config as any).channels?.telegram?.video,
         api_key: getLLMApiKey(config) ?? "",
         public_trainer_names: publicMode
-          ? { male: (config.agent as any)?.name_male ?? "Сергей", female: (config.agent as any)?.name_female ?? "Марина" }
+          ? { male: (config.agent as any)?.name_male ?? "Александр", female: (config.agent as any)?.name_female ?? "Александра" }
           : undefined,
       });
       // Load saved reference photo if exists and no URL in config
