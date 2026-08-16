@@ -29,6 +29,8 @@ function buildPrompt(context: string, mode: "mirror" | "direct"): string {
 export interface SelfieToolConfig {
   apiKey?: string;
   referencePhotoUrl?: string;
+  referenceMaleUrl?: string;
+  referenceFemaleUrl?: string;
 }
 
 export class SelfieTool implements Tool {
@@ -42,11 +44,19 @@ export class SelfieTool implements Tool {
 
   readonly config: SelfieToolConfig;
   private referenceBase64: string | null = null;
+  private referenceMaleBase64: string | null = null;
+  private referenceFemaleBase64: string | null = null;
 
   constructor(config: SelfieToolConfig) {
     this.config = config;
     if (config.referencePhotoUrl) {
       this.loadReference(config.referencePhotoUrl);
+    }
+    if (config.referenceMaleUrl) {
+      this.referenceMaleBase64 = this.loadToDataUrl(config.referenceMaleUrl);
+    }
+    if (config.referenceFemaleUrl) {
+      this.referenceFemaleBase64 = this.loadToDataUrl(config.referenceFemaleUrl);
     }
   }
 
@@ -55,19 +65,33 @@ export class SelfieTool implements Tool {
     this.loadReference(pathOrUrl);
   }
 
-  private loadReference(pathOrUrl: string): void {
+  setReferenceMale(pathOrUrl: string): void {
+    this.referenceMaleBase64 = this.loadToDataUrl(pathOrUrl);
+  }
+
+  setReferenceFemale(pathOrUrl: string): void {
+    this.referenceFemaleBase64 = this.loadToDataUrl(pathOrUrl);
+  }
+
+  private loadToDataUrl(pathOrUrl: string): string | null {
     try {
       if (fs.existsSync(pathOrUrl)) {
         const data = fs.readFileSync(pathOrUrl);
-        this.referenceBase64 = `data:image/jpeg;base64,${data.toString("base64")}`;
         console.log(`📸 Референсное фото загружено: ${pathOrUrl.slice(0, 60)} (${data.length} bytes)`);
+        return `data:image/jpeg;base64,${data.toString("base64")}`;
       } else if (pathOrUrl.startsWith("data:image") || pathOrUrl.startsWith("http")) {
-        this.referenceBase64 = pathOrUrl;
         console.log(`📸 Референсное фото (URL) сохранено: ${pathOrUrl.slice(0, 60)}`);
+        return pathOrUrl;
       }
     } catch (err) {
       console.error(`📸 Ошибка загрузки референсного фото: ${err instanceof Error ? err.message : err}`);
     }
+    return null;
+  }
+
+  private loadReference(pathOrUrl: string): void {
+    const data = this.loadToDataUrl(pathOrUrl);
+    if (data) this.referenceBase64 = data;
   }
 
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
@@ -88,10 +112,19 @@ export class SelfieTool implements Tool {
       ? params.mode
       : detectMode(context);
 
+    // Choose reference by the requesting user's gender (set by the engine)
+    const gender = String(params._gender ?? "");
+    const selectedRef =
+      (gender === "female" && this.referenceFemaleBase64)
+        ? this.referenceFemaleBase64
+        : (gender === "male" && this.referenceMaleBase64)
+          ? this.referenceMaleBase64
+          : this.referenceBase64;
+
     const prompt = buildPrompt(context, mode);
 
     // Try with reference photo first (multimodal), fall back to text-only
-    const tryWithRef = !!(this.referenceBase64);
+    const tryWithRef = !!(selectedRef);
 
     try {
       console.log(`📸 Selfie (OpenRouter): mode=${mode}, ref=${tryWithRef}, prompt="${prompt.slice(0, 80)}"`);
@@ -102,7 +135,7 @@ export class SelfieTool implements Tool {
           role: "user",
           content: [
             { type: "text", text: `Generate a selfie PRESERVING THE EXACT FACE, IDENTITY, AND APPEARANCE of the person in the reference photo below. The face, facial features, hair, eyes, nose, mouth must be IDENTICAL to the reference. Only change the pose, clothing, background, lighting, or expression as described. CRITICAL: do not alter the person's identity or facial structure. Generate a photo that looks like the same person in a different situation.\n\n${prompt}` },
-            { type: "image_url", image_url: { url: this.referenceBase64 } },
+            { type: "image_url", image_url: { url: selectedRef } },
           ],
         }];
       } else {

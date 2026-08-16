@@ -544,7 +544,10 @@ export class Engine {
     }
 
     try {
-      const params = userId ? { ...args, _userId: userId } : args;
+      const gender = userId ? getUserGender(userId) : null;
+      const params = userId
+        ? { ...args, _userId: userId, ...(gender ? { _gender: gender } : {}) }
+        : args;
       return await tool.execute(params);
     } catch (err) {
       return { success: false, output: "", error: err instanceof Error ? err.message : String(err) };

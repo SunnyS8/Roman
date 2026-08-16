@@ -159,11 +159,18 @@ async function main() {
   const selfieTool = new SelfieTool({
     apiKey: getLLMApiKey(config) ?? "",
     referencePhotoUrl: selfiesConfig?.reference_photo_url,
+    referenceMaleUrl: selfiesConfig?.reference_male,
+    referenceFemaleUrl: selfiesConfig?.reference_female,
   });
   tools.register(selfieTool);
   // Image generation tool — uses OpenRouter API key
   const llmApiKey = getLLMApiKey(config);
-  const imageGenTool = llmApiKey ? new ImageGenTool({ apiKey: llmApiKey, referencePhotoUrl: selfiesConfig?.reference_photo_url }) : null;
+  const imageGenTool = llmApiKey ? new ImageGenTool({
+    apiKey: llmApiKey,
+    referencePhotoUrl: selfiesConfig?.reference_photo_url,
+    referenceMaleUrl: selfiesConfig?.reference_male,
+    referenceFemaleUrl: selfiesConfig?.reference_female,
+  }) : null;
   if (imageGenTool) {
     tools.register(imageGenTool);
   }

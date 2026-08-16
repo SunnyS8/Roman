@@ -7,6 +7,8 @@ const MODEL = "google/gemini-3.1-flash-image";
 export interface ImageGenToolConfig {
   apiKey: string;
   referencePhotoUrl?: string;
+  referenceMaleUrl?: string;
+  referenceFemaleUrl?: string;
 }
 
 export class ImageGenTool implements Tool {
@@ -21,6 +23,8 @@ export class ImageGenTool implements Tool {
   readonly config: ImageGenToolConfig;
   private apiKey: string;
   private referenceBase64: string | null = null;
+  private referenceMaleBase64: string | null = null;
+  private referenceFemaleBase64: string | null = null;
 
   constructor(config: ImageGenToolConfig) {
     this.apiKey = config.apiKey;
@@ -28,33 +32,46 @@ export class ImageGenTool implements Tool {
     if (config.referencePhotoUrl) {
       this.loadReference(config.referencePhotoUrl);
     }
+    if (config.referenceMaleUrl) {
+      this.referenceMaleBase64 = this.loadToDataUrl(config.referenceMaleUrl);
+    }
+    if (config.referenceFemaleUrl) {
+      this.referenceFemaleBase64 = this.loadToDataUrl(config.referenceFemaleUrl);
+    }
   }
 
   setReferencePhoto(pathOrUrl: string): void {
     this.loadReference(pathOrUrl);
   }
 
-  private loadReference(pathOrUrl: string): void {
+  setReferenceMale(pathOrUrl: string): void {
+    this.referenceMaleBase64 = this.loadToDataUrl(pathOrUrl);
+  }
+
+  setReferenceFemale(pathOrUrl: string): void {
+    this.referenceFemaleBase64 = this.loadToDataUrl(pathOrUrl);
+  }
+
+  private loadToDataUrl(pathOrUrl: string): string | null {
     try {
       const resolved = pathOrUrl.replace(/^~/, os.homedir());
       if (fs.existsSync(resolved)) {
         const data = fs.readFileSync(resolved);
-        this.referenceBase64 = `data:image/jpeg;base64,${data.toString("base64")}`;
         console.log(`🎨 Референс загружен в image_gen: ${resolved.slice(0, 60)} (${data.length} bytes)`);
+        return `data:image/jpeg;base64,${data.toString("base64")}`;
       } else if (pathOrUrl.startsWith("data:image") || pathOrUrl.startsWith("http")) {
-        this.referenceBase64 = pathOrUrl;
         console.log(`🎨 Референс (URL) сохранён в image_gen`);
-      } else {
-        // Try as literal path after homedir expansion
-        const expanded = pathOrUrl.replace(/^~/, os.homedir());
-        if (fs.existsSync(expanded)) {
-          const data = fs.readFileSync(expanded);
-          this.referenceBase64 = `data:image/jpeg;base64,${data.toString("base64")}`;
-        }
+        return pathOrUrl;
       }
     } catch (err) {
       console.error(`🎨 Ошибка загрузки референса в image_gen: ${err instanceof Error ? err.message : err}`);
     }
+    return null;
+  }
+
+  private loadReference(pathOrUrl: string): void {
+    const data = this.loadToDataUrl(pathOrUrl);
+    if (data) this.referenceBase64 = data;
   }
 
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
@@ -66,12 +83,25 @@ export class ImageGenTool implements Tool {
     // Check if reference was requested: either explicit path or "default"
     const refParam = String(params.reference ?? "").trim().toLowerCase();
     let useRef = false;
+    let selectedRef: string | null = null;
+
+    // Prefer gender-specific reference (set by the engine from the user's profile)
+    const gender = String(params._gender ?? "");
+    if (gender === "female" && this.referenceFemaleBase64) {
+      selectedRef = this.referenceFemaleBase64;
+    } else if (gender === "male" && this.referenceMaleBase64) {
+      selectedRef = this.referenceMaleBase64;
+    } else {
+      selectedRef = this.referenceBase64;
+    }
+
     if (refParam === "default" || refParam === "yes" || refParam === "да") {
-      useRef = !!this.referenceBase64;
+      useRef = !!selectedRef;
     } else if (refParam && fs.existsSync(refParam.replace(/^~/, os.homedir()))) {
       // Load the explicitly specified reference
       this.loadReference(refParam);
-      useRef = !!this.referenceBase64;
+      selectedRef = this.referenceBase64;
+      useRef = !!selectedRef;
     }
 
     try {
@@ -84,7 +114,7 @@ export class ImageGenTool implements Tool {
           role: "user",
           content: [
             { type: "text", text: `Generate an image PRESERVING THE EXACT FACE, IDENTITY, AND APPEARANCE of the person in the reference photo below. The face, facial features, hair, eyes must be IDENTICAL to the reference. Only change pose, clothing, background, lighting, or expression as described. CRITICAL: the person's identity must remain the same.\n\n${prompt}` },
-            { type: "image_url", image_url: { url: this.referenceBase64 } },
+            { type: "image_url", image_url: { url: selectedRef } },
           ],
         }];
       } else {
