@@ -35,16 +35,25 @@ function buildGenderBlock(gender: "female" | "male"): string {
  *
  * Injects agent identity, personality, settings capability,
  * owner info, and tools awareness.
+ *
+ * @param options.publicMode — public multi-user mode (trainer); trims
+ *   owner/skills/settings/connected-services sections and describes only
+ *   the tools that are actually registered.
+ * @param options.availableTools — names of registered tools.
  */
 export function buildSystemPrompt(
   config: PromptConfig,
   userMessage?: string,
   chatId?: string,
   connectedServices?: string[],
+  options?: { publicMode?: boolean; availableTools?: string[] },
 ): string {
   const name = config.name || "Betsy";
   const gender = config.gender ?? "female";
   const genderBlock = buildGenderBlock(gender);
+  const publicMode = options?.publicMode ?? false;
+  const availableTools = options?.availableTools ?? [];
+  const has = (tool: string) => availableTools.includes(tool);
 
   let prompt = `Ты — ${name}.
 
@@ -115,9 +124,9 @@ ${config.biography || "Ты взрослый мужчина, 45 лет. За п�
     }
   }
 
-  // Settings capability
-  prompt += `
-
+  // Settings capability — only for private/personal mode
+  if (!publicMode) {
+    prompt += `
 ## Настройки через чат
 
 Когда пишут /settings или "настройки", покажи меню:
@@ -132,19 +141,28 @@ ${config.biography || "Ты взрослый мужчина, 45 лет. За п�
 
 Используй tool \`self_config\` чтобы сохранить изменения в конфиг.
 Используй tool \`memory\` чтобы запомнить факты.
-Используй tool \`scheduler\` чтобы настроить напоминания.
+Используй tool \`scheduler\` чтобы настроить напоминания.`;
+  }
+
+  // Skills — only for private/personal mode
+  if (!publicMode) {
+    prompt += `
 
 ## Навыки (скиллы)
 
-Ты умеешь создавать навыки — повторяющиеся сценарии. Когда просят "научись делать X", создай скилл через пошаговый диалог и сохрани.
+Ты умеешь создавать навыки — повторяющиеся сценарии. Когда просят "научись делать X", создай скилл через пошаговый диалог и сохрани.`;
+  }
 
+  prompt += `
 ## Психологические знания
 
 В твоей памяти есть знания по психологии (метод Адлера и Дрейкурса): принятие себя, сотрудничество вместо борьбы, личная ответственность, 9 приёмов принятия себя. Если разговор касается психологии, самооценки, отношений, мотивации - используй memory с поиском по topic: psychology_adler_dreikurs, psychology_self_acceptance.
 
 ## Инструменты
 
-Ты умеешь многое — выполнять команды (shell), отправлять файлы в чат (send_file), работать с файлами (files), открывать сайты и искать в интернете (browser, http), запоминать важное (memory), ставить напоминания (scheduler), настраивать себя (self_config), подключаться к серверам (ssh), отправлять селфи (selfie). Для получения контента сайтов сначала пробуй http (он быстрее). Если http вернул ошибку (403, 503, пустой ответ, капча) — повтори запрос через browser (action: get_text). browser также используй для интерактивных действий (клик, заполнение форм, скриншоты). Scheduler: schedule_type="at" + at="+5m" для одноразовых, schedule_type="every" + every="30m" для интервалов, schedule_type="cron" + cron_expression="0 20 * * *" для расписаний. Когда просят "напомни", "напиши через", "каждый день" — используй scheduler.
+${publicMode
+      ? buildPublicToolGuide(availableTools)
+      : `Ты умеешь многое — выполнять команды (shell), отправлять файлы в чат (send_file), работать с файлами (files), открывать сайты и искать в интернете (browser, http), запоминать важное (memory), ставить напоминания (scheduler), настраивать себя (self_config), подключаться к серверам (ssh), отправлять селфи (selfie). Для получения контента сайтов сначала пробуй http (он быстрее). Если http вернул ошибку (403, 503, пустой ответ, капча) — повтори запрос через browser (action: get_text). browser также используй для интерактивных действий (клик, заполнение форм, скриншоты). Scheduler: schedule_type="at" + at="+5m" для одноразовых, schedule_type="every" + every="30m" для интервалов, schedule_type="cron" + cron_expression="0 20 * * *" для расписаний. Когда просят "напомни", "напиши через", "каждый день" — используй scheduler.`}
 
 ВАЖНО ПРО СЕЛФИ И КАРТИНКИ: Если человек просит фото/селфи/картинку/изображение/прислать тебя — ОБЯЗАТЕЛЬНО вызови tool selfie или image_gen. НЕЛЬЗЯ просто отвечать текстом с плейсхолдером [Selfie] или [Картинка]. Нужно реально сгенерировать.
 
@@ -162,10 +180,12 @@ ${config.biography || "Ты взрослый мужчина, 45 лет. За п�
 
 Если выполняешь многоходовую задачу, показывай прогресс каждого шага.`;
 
-  if (connectedServices && connectedServices.length > 0) {
-    prompt += `\n\n## Подключённые сервисы\n\nУ пользователя подключены: ${connectedServices.join(", ")}. Для запросов к этим сервисам используй tool \`http\` — просто укажи URL, НЕ указывай заголовок Authorization, он подставится автоматически. Пример: http(url="https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=5", method="GET") — БЕЗ headers. Для подключения новых сервисов используй tool \`connect_service\`.`;
-  } else {
-    prompt += `\n\n## Подключённые сервисы\n\nУ пользователя нет подключённых сервисов. Для подключения используй tool \`connect_service\` с action=list.`;
+  if (!publicMode) {
+    if (connectedServices && connectedServices.length > 0) {
+      prompt += `\n\n## Подключённые сервисы\n\nУ пользователя подключены: ${connectedServices.join(", ")}. Для запросов к этим сервисам используй tool \`http\` — просто укажи URL, НЕ указывай заголовок Authorization, он подставится автоматически. Пример: http(url="https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=5", method="GET") — БЕЗ headers. Для подключения новых сервисов используй tool \`connect_service\`.`;
+    } else {
+      prompt += `\n\n## Подключённые сервисы\n\nУ пользователя нет подключённых сервисов. Для подключения используй tool \`connect_service\` с action=list.`;
+    }
   }
 
   // Current query
@@ -174,4 +194,37 @@ ${config.biography || "Ты взрослый мужчина, 45 лет. За п�
   }
 
   return prompt;
+}
+
+/** Build a tool guide listing only the tools actually registered. */
+function buildPublicToolGuide(availableTools: string[]): string {
+  const lines: string[] = [];
+  if (availableTools.includes("food_analysis")) {
+    lines.push("Когда человек присылает фото еды — ОБЯЗАТЕЛЬНО используй food_analysis: посчитай калории, БЖУ и дай рекомендацию.");
+  }
+  if (availableTools.includes("scheduler")) {
+    lines.push("Когда просят «напомни», «напиши через», «каждый день» — используй scheduler (schedule_type=\"at\" + at=\"+5m\", schedule_type=\"every\" + every=\"30m\", schedule_type=\"cron\" + cron_expression=\"0 20 * * *\").");
+  }
+  if (availableTools.includes("memory")) {
+    lines.push("Запоминай важные факты о человеке через memory — имя, возраст, вес, цели, ограничения, чтобы советы были персональными.");
+  }
+  if (availableTools.includes("image_gen")) {
+    lines.push("Если просят картинку/иллюстрацию — используй image_gen.");
+  }
+  if (availableTools.includes("selfie")) {
+    lines.push("Если просят твоё селфи — используй selfie.");
+  }
+  if (availableTools.includes("web")) {
+    lines.push("Если нужна актуальная информация — используй web.");
+  }
+  if (availableTools.includes("http")) {
+    lines.push("Если нужно получить данные из интернета — используй http.");
+  }
+  if (availableTools.includes("send_file")) {
+    lines.push("Если нужно отправить файл — используй send_file.");
+  }
+  if (lines.length === 0) {
+    return "У тебя нет дополнительных инструментов — помогай знаниями и опытом.";
+  }
+  return lines.join("\n");
 }

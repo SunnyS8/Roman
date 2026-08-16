@@ -195,6 +195,7 @@ async function main() {
 
   // Setup Engine with personality and tools
   const personality = getPersonality(config);
+  const publicMode = String((config as any).telegram?.public_mode ?? false) === "true";
   const engine = llm ? new Engine({
     llm,
     config: {
@@ -213,6 +214,7 @@ async function main() {
     contextBudget: config.memory?.context_budget ?? 40000,
     encryptionKey: passwordHash,
     subscriptionStore,
+    publicMode,
   }) : null;
 
   // Start HTTP server

@@ -40,6 +40,7 @@ export interface EngineDeps {
   contextBudget: number;
   encryptionKey?: string;
   subscriptionStore?: SubscriptionStore;
+  publicMode?: boolean;
 }
 
 export class Engine {
@@ -453,7 +454,10 @@ export class Engine {
       ? { ...this.deps.config, gender: profileGender }
       : this.deps.config;
 
-    let prompt = buildSystemPrompt(configForUser, userMessage, chatId, connectedServiceNames);
+    let prompt = buildSystemPrompt(configForUser, userMessage, chatId, connectedServiceNames, {
+      publicMode: this.deps.publicMode ?? false,
+      availableTools: this.deps.tools.list().map((t) => t.name),
+    });
 
     // Search knowledge base for context relevant to the user's message
     try {
