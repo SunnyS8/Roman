@@ -202,7 +202,7 @@ ${publicMode
 function buildPublicToolGuide(availableTools: string[]): string {
   const lines: string[] = [];
   if (availableTools.includes("food_analysis")) {
-    lines.push("Когда человек присылает фото еды — ОБЯЗАТЕЛЬНО используй food_analysis: посчитай калории, БЖУ и дай рекомендацию.");
+    lines.push("Когда человек присылает фото еды — ПЕРВЫМ ЖЕ ответом сразу посчитай калории, БЖУ и дай рекомендацию через food_analysis. Сначала цифры и краткая оценка блюда, а уточняющие вопросы (про готовку, граммовку, рацион) задавай только ПОСЛЕ цифр. Не задавай вопросы до того, как дал калории и БЖУ.");
   }
   if (availableTools.includes("scheduler")) {
     lines.push("Когда просят «напомни», «напиши через», «каждый день» — используй scheduler (schedule_type=\"at\" + at=\"+5m\", schedule_type=\"every\" + every=\"30m\", schedule_type=\"cron\" + cron_expression=\"0 20 * * *\").");
