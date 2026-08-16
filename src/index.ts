@@ -302,14 +302,24 @@ async function main() {
         return;
       }
 
-      const prompt = [
-        `Сработало запланированное задание "${task.name}".`,
-        `Задача: ${task.command}`,
-        task.context ? `\nКонтекст разговора при создании задачи:\n${task.context}` : "",
-        `\nНапиши владельцу сообщение в связи с этой задачей.`,
-      ].join("\n");
-
       try {
+        // Simple reminders carry their message text in task.command — send them
+        // directly, no LLM round-trip (avoids empty "..." replies and costs).
+        // Only data-gathering tasks (e.g. the daily food report) go through the LLM.
+        const text = (task.command || "").trim();
+        if (task.name !== "daily_food_report" && text && text !== "...") {
+          await channel.send(task.chatId, { text });
+          console.log(`✅ Scheduler: delivered "${task.name}" to ${task.channel}:${task.chatId}`);
+          return;
+        }
+
+        const prompt = [
+          `Сработало запланированное задание "${task.name}".`,
+          `Задача: ${task.command}`,
+          task.context ? `\nКонтекст разговора при создании задачи:\n${task.context}` : "",
+          `\nНапиши владельцу сообщение в связи с этой задачей.`,
+        ].join("\n");
+
         const result = await engine.process({
           channelName: task.channel,
           userId: task.chatId,
@@ -317,7 +327,8 @@ async function main() {
           timestamp: Date.now(),
           metadata: { scheduledTask: true },
         });
-        await channel.send(task.chatId, result);
+        const resultText = (result.text || "").trim();
+        await channel.send(task.chatId, { text: resultText || text || "Напоминание" });
         console.log(`✅ Scheduler: delivered "${task.name}" to ${task.channel}:${task.chatId}`);
       } catch (err) {
         console.error(`❌ Scheduler: failed to deliver "${task.name}":`, err);

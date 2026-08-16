@@ -64,6 +64,24 @@ function buildResponse(
   };
 }
 
+/**
+ * Reasoning models (Gemini, DeepSeek-R1 via OpenRouter) often return their
+ * answer in `reasoning`/`reasoning_content` while `content` is empty. Prefer
+ * real content, but fall back to reasoning so scheduled reminders never turn
+ * into bare "..." replies.
+ */
+function extractText(message: Record<string, unknown> | null | undefined): string {
+  if (!message) return "";
+  const content = message.content;
+  if (typeof content === "string" && content.trim()) return content;
+  const reasoning =
+    (typeof message.reasoning === "string" ? message.reasoning : "") ||
+    (typeof (message as Record<string, unknown>).reasoning_content === "string"
+      ? ((message as Record<string, unknown>).reasoning_content as string)
+      : "");
+  return reasoning.trim();
+}
+
 const BILLING_KEYWORDS = ["insufficient_quota", "credits", "billing", "payment", "exceeded your current quota"];
 
 /** Check if an error indicates the account balance is exhausted. */
@@ -139,7 +157,7 @@ export function createOpenRouterClient(opts: OpenRouterOptions): LLMClient {
       }));
 
       return buildResponse(
-        message?.content ?? "",
+        extractText(message as unknown as Record<string, unknown> | null | undefined),
         choice?.finish_reason ?? null,
         toolCalls,
         res.usage ? { prompt_tokens: res.usage.prompt_tokens, completion_tokens: res.usage.completion_tokens } : undefined,
@@ -156,6 +174,7 @@ export function createOpenRouterClient(opts: OpenRouterOptions): LLMClient {
       });
 
       let text = "";
+      let reasoningText = "";
       let finishReason: string | null = null;
       let usage: { prompt_tokens: number; completion_tokens: number } | undefined;
       // Accumulate tool calls from stream deltas
@@ -169,6 +188,15 @@ export function createOpenRouterClient(opts: OpenRouterOptions): LLMClient {
         if (delta.content) {
           text += delta.content;
           onChunk(delta.content);
+        }
+
+        // Reasoning content — fall back to it only when text stays empty
+        const d = delta as Record<string, unknown>;
+        if (!delta.content) {
+          const r =
+            (typeof d.reasoning === "string" ? d.reasoning : "") ||
+            (typeof d.reasoning_content === "string" ? (d.reasoning_content as string) : "");
+          if (r) reasoningText += r;
         }
 
         // Tool calls (streamed as deltas with index)
@@ -202,7 +230,7 @@ export function createOpenRouterClient(opts: OpenRouterOptions): LLMClient {
           }))
         : undefined;
 
-      return buildResponse(text, finishReason, toolCalls, usage);
+      return buildResponse(text || reasoningText, finishReason, toolCalls, usage);
     },
   };
 }

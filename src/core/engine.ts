@@ -226,7 +226,7 @@ export class Engine {
 
         // If LLM didn't request tools, return the text response
         if (response.stopReason !== "tool_use" || !response.toolCalls?.length) {
-          let text = response.text || "...";
+          let text = response.text || "Что-то пошло не так, попробуй ещё раз.";
 
           // Auto-call tool when LLM outputs [Selfie] / [Image] / [Картинка] placeholder,
           // OR the user (or recent history) asked for a selfie/photo but the LLM replied with text.
