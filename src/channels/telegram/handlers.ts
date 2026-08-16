@@ -3,7 +3,7 @@ import type { IncomingMessage, OutgoingMessage, ProgressCallback } from "../../c
 import type { MessageHandler } from "../types.js";
 import { sendVoiceResponse } from "./voice.js";
 import { sendVideoNoteHubris } from "./hubris-video.js";
-import { SubscriptionStore } from "../../core/subscription-store.js";
+import { SubscriptionStore, type Tier, type Feature } from "../../core/subscription-store.js";
 import { getUserGender, setUserGender } from "../../core/memory/conversations.js";
 import fs from "node:fs";
 import path from "node:path";
@@ -556,10 +556,79 @@ export function registerHandlers(
         `Можешь просто написать всё сразу или по частям — я всё запомню. 😊`,
     );
   });
-  // /status
-  bot.command("status", (ctx) => handleWithTyping(ctx, "/status"));
-  // /help
-  bot.command("help", (ctx) => handleWithTyping(ctx, "/help"));
+  // /status — show current plan, daily usage and available features
+  bot.command("status", async (ctx) => {
+    const chatId = String(ctx.chat?.id ?? "");
+    if (!publicMode || !subscriptionStore) {
+      await handleWithTyping(ctx, "/status");
+      return;
+    }
+    const sub = subscriptionStore.getOrCreateSubscription(chatId, "telegram");
+    const today = new Date().toISOString().slice(0, 10);
+    const used = subscriptionStore.getDailyUsage(chatId, today, "telegram");
+    const tier = sub.tier;
+    const limit = subscriptionStore.getDailyLimit(tier);
+    const features = subscriptionStore.getFeatures(tier);
+
+    const tierLabel: Record<Tier, string> = {
+      free: "Бесплатный",
+      trial: "Пробный (триал)",
+      pro: "PRO",
+      premium: "PREMIUM",
+    };
+    const featureLabel: Record<Feature, string> = {
+      text_chat: "💬 Общение",
+      voice_input: "🎤 Голосовые сообщения",
+      voice_output: "🎙️ Ответы голосом",
+      food_analysis: "🥗 Анализ еды",
+      image_gen: "🖼️ Генерация картинок",
+      selfie: "📸 Селфи",
+      scheduler: "⏰ Напоминания",
+      web_search: "🌐 Поиск в интернете",
+    };
+
+    let trialInfo = "";
+    if (tier === "trial" && sub.trialEnd) {
+      const hoursLeft = Math.max(0, Math.ceil((sub.trialEnd - Date.now()) / 3_600_000));
+      trialInfo = hoursLeft > 0
+        ? `⏳ Триал истекает через ~${hoursLeft} ч\n`
+        : "⏳ Триал истёк\n";
+    }
+
+    const limitText = Number.isFinite(limit)
+      ? `📨 Сообщений сегодня: ${used} / ${limit}`
+      : `📨 Сообщений сегодня: ${used} (безлимит)`;
+
+    const featuresText = [...features].map((f) => `• ${featureLabel[f] ?? f}`).join("\n");
+
+    await ctx.reply(
+      `📊 Твой статус\n\n` +
+      `💳 Тариф: ${tierLabel[tier]}\n` +
+      `${trialInfo}` +
+      `${limitText}\n\n` +
+      `✨ Доступно:\n${featuresText}\n\n` +
+      `🔧 Команды: /help — возможности, /status — этот экран`,
+    );
+  });
+
+  // /help — static list of commands and capabilities
+  bot.command("help", async (ctx) => {
+    await ctx.reply(
+      `🤖 Я — твой персональный тренер и помощник по здоровью\n\n` +
+      `🏋️ Тренировки — планы для дома и зала, техника, прогресс\n` +
+      `🥗 Питание — анализ фото еды, калории и БЖУ, меню\n` +
+      `📔 Дневник питания — запомню, что ты ел, подведу итог\n` +
+      `🧠 Поддержка — мотивация, настроение, самооценка\n` +
+      `💬 Друг — выслушаю и поддержу\n` +
+      `🎙️ Голосовые — скажи «ответь голосом» и я озвучу ответ\n` +
+      `⏰ Напоминания — «напомни через 2 часа выпить воды»\n` +
+      `🧠 Память — я запомню о тебе важное\n\n` +
+      `🔧 Команды:\n` +
+      `/help — эта справка\n` +
+      `/status — тариф и лимит сообщений\n\n` +
+      `Просто напиши, с чем помочь — и начнём! 😊`,
+    );
+  });
 
   // /voice <text>
   bot.command("voice", async (ctx) => {
