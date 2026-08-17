@@ -303,11 +303,14 @@ async function main() {
       }
 
       try {
-        // Simple reminders carry their message text in task.command — send them
-        // directly, no LLM round-trip (avoids empty "..." replies and costs).
-        // Only data-gathering tasks (e.g. the daily food report) go through the LLM.
+        // Some tasks carry a ready-made message in task.command ("Саша, сегодня
+        // вторник! Время собираться в зал!") — send those directly, no LLM.
+        // Other tasks carry an INSTRUCTION for the LLM ("Напиши Саше, спроси...")
+        // — those must go through the LLM to produce the actual message.
         const text = (task.command || "").trim();
-        if (task.name !== "daily_food_report" && text && text !== "...") {
+        const INSTRUCTION_RE = /^(напиши|спроси|запроси|проверь|пожелай|узнай|отправь|сделай|составь|напомни|подведи|пришли)\b/i;
+        const isInstruction = task.name === "daily_food_report" || INSTRUCTION_RE.test(text);
+        if (!isInstruction && text && text !== "...") {
           await channel.send(task.chatId, { text });
           console.log(`✅ Scheduler: delivered "${task.name}" to ${task.channel}:${task.chatId}`);
           return;
@@ -327,8 +330,15 @@ async function main() {
           timestamp: Date.now(),
           metadata: { scheduledTask: true },
         });
-        const resultText = (result.text || "").trim();
-        await channel.send(task.chatId, { text: resultText || text || "Напоминание" });
+        const raw = (result.text || "").trim();
+        // Strip degenerate outputs (pure "..." / whitespace / newlines) so the
+        // user never receives an empty reminder again. Never fall back to the
+        // raw instruction text for instruction-style tasks.
+        const resultText = /^[.\s\n]*$/.test(raw) ? "" : raw;
+        const fallback = isInstruction
+          ? `⏰ Напоминание: ${task.name}`
+          : text || `⏰ Напоминание: ${task.name}`;
+        await channel.send(task.chatId, { text: resultText || fallback });
         console.log(`✅ Scheduler: delivered "${task.name}" to ${task.channel}:${task.chatId}`);
       } catch (err) {
         console.error(`❌ Scheduler: failed to deliver "${task.name}":`, err);

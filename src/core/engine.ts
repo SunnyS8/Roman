@@ -127,7 +127,9 @@ export class Engine {
 
     // Scheduled-task triggers are not real user messages: keep them out of
     // the conversation window and the DB so they don't crowd out the dialog.
-    // The task text still reaches the LLM via the system prompt ("Текущий запрос").
+    // But they MUST still reach the LLM as an explicit user turn — putting them
+    // only in the system prompt ("Текущий запрос") makes models reply with
+    // empty text ("..."). We pass them in the messages array each turn.
     const isScheduledTask = msg.metadata?.scheduledTask === true;
 
     if (!isScheduledTask) {
@@ -182,6 +184,9 @@ export class Engine {
         const messages: LLMMessage[] = [
           { role: "system", content: systemPrompt },
           ...history,
+          ...(isScheduledTask
+            ? [{ role: "user" as const, content: textContent }]
+            : []),
         ];
 
         // Use streaming for text responses, non-streaming for tool calls
