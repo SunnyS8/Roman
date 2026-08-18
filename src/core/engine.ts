@@ -238,7 +238,7 @@ export class Engine {
           const placeholderRE = /\[Selfie\]|\[Image\]|\[Картинка\]|\[Изображение\]/i;
           const userReq = (msg.text || "").toLowerCase();
 
-          const asksSelfie = /\bселфи\b/.test(userReq) || /прислать\s+тебя|покажи\s+себя|покажи\s+меня|фото\s+себя|фото\s+тебя|сфотограф/.test(userReq);
+          const asksSelfie = /(^|[^\p{L}])селфи($|[^\p{L}])/iu.test(userReq) || /прислать\s+тебя|покажи\s+себя|покажи\s+меня|фото\s+себя|фото\s+тебя|сфотограф/.test(userReq);
           const asksPhoto = /(пришли|сделай|сгенерируй|отправь|сфотограф|нарисуй)\s+(фото|фотку|фотографию|картинку|изображение)/i.test(userReq);
 
           // Detect role-breaking refusals like "я не умею", "я всего лишь программа", "я не настоящий человек"
@@ -250,7 +250,7 @@ export class Engine {
           const continuation = /попробуй|ещё\s+раз|еще\s+раз|повтори|опять|снова|давай\s+сам/.test(userReq);
           let historyMediaReq: string | null = null;
           if (continuation || isRefusal) {
-            const mediaReqRE = /\bселфи\b|прислать\s+тебя|покажи\s+себя|покажи\s+меня|фото\s+себя|фото\s+тебя|сфотограф|пришли\s+(меня|тебя|свое|своё)|(пришли|сделай|отправь|сгенерируй|нарисуй).{0,20}(селфи|фото|фотку|фотографию|картинку|изображение)|картинк/i;
+            const mediaReqRE = /(^|[^\p{L}])селфи($|[^\p{L}])|прислать\s+тебя|покажи\s+себя|покажи\s+меня|фото\s+себя|фото\s+тебя|сфотограф|пришли\s+(меня|тебя|свое|своё)|(пришли|сделай|отправь|сгенерируй|нарисуй).{0,20}(селфи|фото|фотку|фотографию|картинку|изображение)|картинк/iu;
             for (let i = history.length - 1; i >= 0; i--) {
               const m = history[i];
               if (m.role === "user" && typeof m.content === "string" && mediaReqRE.test(m.content)) {
@@ -263,7 +263,7 @@ export class Engine {
           const shouldGenerate = placeholderRE.test(text) || asksSelfie || asksPhoto || (isRefusal && (asksSelfie || asksPhoto || historyMediaReq));
           if (shouldGenerate) {
             const context = historyMediaReq ?? msg.text ?? "";
-            const useSelfie = asksSelfie || /\bселфи\b/i.test(context) || /selfie/i.test(text);
+            const useSelfie = asksSelfie || /(^|[^\p{L}])селфи($|[^\p{L}])/iu.test(context) || /selfie/i.test(text);
             const result = useSelfie
               ? await this.executeTool("selfie", { context }, userId)
               : await this.executeTool("image_gen", { prompt: context }, userId);

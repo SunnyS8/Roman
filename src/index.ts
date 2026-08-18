@@ -308,7 +308,9 @@ async function main() {
         // Other tasks carry an INSTRUCTION for the LLM ("Напиши Саше, спроси...")
         // — those must go through the LLM to produce the actual message.
         const text = (task.command || "").trim();
-        const INSTRUCTION_RE = /^(напиши|спроси|запроси|проверь|пожелай|узнай|отправь|сделай|составь|напомни|подведи|пришли)\b/i;
+        // NOTE: JS \b only recognizes ASCII word chars, so it never matches
+        // after a Cyrillic verb. Use an explicit boundary instead.
+        const INSTRUCTION_RE = /^(напиши|спроси|запроси|проверь|пожелай|узнай|отправь|сделай|составь|напомни|подведи|пришли)(?=$|[\s,.;!?:…])/i;
         const isInstruction = task.name === "daily_food_report" || INSTRUCTION_RE.test(text);
         if (!isInstruction && text && text !== "...") {
           await channel.send(task.chatId, { text });
